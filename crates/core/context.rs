@@ -56,8 +56,6 @@ pub(crate) struct PlatformContext {
     #[pin]
     motion_preference: Property<MotionPreference>,
     modifiers: Cell<InternalKeyboardModifierState>,
-    #[cfg(all(unix, not(target_os = "macos")))]
-    xdg_app_id: RefCell<Option<crate::SharedString>>,
     pub(crate) window_shown_hook:
         RefCell<Option<Box<dyn FnMut(&Rc<dyn crate::platform::WindowAdapter>)>>>,
     pub(crate) window_event_hook: RefCell<Option<WindowEventHook>>,
@@ -84,8 +82,6 @@ impl PlatformContext {
                 "PlatformContext::motion_preference",
             ),
             modifiers: Cell::new(Default::default()),
-            #[cfg(all(unix, not(target_os = "macos")))]
-            xdg_app_id: Default::default(),
             window_shown_hook: Default::default(),
             window_event_hook: Default::default(),
             contexts: Default::default(),
@@ -313,7 +309,6 @@ impl SlintContext {
         self.platform().new_event_loop_proxy()
     }
 
-    #[cfg(target_has_atomic = "ptr")]
     /// Context specific version of `slint::spawn_local`
     pub fn spawn_local<F: core::future::Future + 'static>(
         &self,
@@ -478,18 +473,8 @@ impl SlintContext {
     }
 
     pub fn set_xdg_app_id(&self, _app_id: crate::SharedString) {
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            self.platform_context().xdg_app_id.replace(Some(_app_id));
-        }
     }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
-    pub fn xdg_app_id(&self) -> Option<crate::SharedString> {
-        self.platform_context().xdg_app_id.borrow().clone()
-    }
-
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
     pub fn xdg_app_id(&self) -> Option<crate::SharedString> {
         None
     }
@@ -521,7 +506,6 @@ impl SlintContext {
     }
 
     /// Override the locale used for decimal separator detection (testing only).
-    #[cfg(feature = "std")]
     pub fn set_locale(&self, locale: &str) {
         self.0
             .as_ref()
@@ -604,7 +588,6 @@ pub fn with_existing_context<R>(f: impl FnOnce(&SlintContext) -> R) -> Result<R,
 }
 
 #[test]
-#[cfg(feature = "std")]
 fn with_existing_context_never_creates_a_platform() {
     assert!(matches!(with_existing_context(|_| ()), Err(PlatformError::NoPlatform)));
 
@@ -643,7 +626,7 @@ fn replace_hook<T>(
     })
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod platform_sharing_tests {
     use super::*;
     use core::time::Duration;

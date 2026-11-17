@@ -64,9 +64,7 @@ mod image;
 pub use self::image::*;
 mod drag_n_drop;
 pub use drag_n_drop::*;
-#[cfg(feature = "path")]
 mod path;
-#[cfg(feature = "path")]
 pub use path::*;
 pub mod system_tray;
 
@@ -86,7 +84,7 @@ type MenuEntryArg = (MenuEntry,);
 type StringArg = (SharedString,);
 type MenuEntryModel = crate::model::ModelRc<MenuEntry>;
 
-#[cfg(all(feature = "ffi", windows))]
+#[cfg(feature = "ffi")]
 #[macro_export]
 macro_rules! declare_item_vtable {
     (fn $getter:ident() -> $item_vtable_ty:ident for $item_ty:ty) => {
@@ -101,7 +99,7 @@ macro_rules! declare_item_vtable {
         }
     };
 }
-#[cfg(not(all(feature = "ffi", windows)))]
+#[cfg(not(feature = "ffi"))]
 #[macro_export]
 macro_rules! declare_item_vtable {
     (fn $getter:ident() -> $item_vtable_ty:ident for $item_ty:ty) => {
@@ -1293,7 +1291,6 @@ pub struct WindowItem {
 
 impl Item for WindowItem {
     fn init(self: Pin<&Self>, _self_rc: &ItemRc) {
-        #[cfg(feature = "std")]
         self.full_screen.set(std::env::var("SLINT_FULLSCREEN").is_ok());
     }
 
@@ -1563,8 +1560,6 @@ pub struct ContextMenu {
     pub enabled: Property<bool>,
     /// Set for the menus of a `MenuBar`, so that pointer events outside them still reach the menu bar.
     pub is_menu_bar: Property<bool>,
-    #[cfg(target_os = "android")]
-    long_press_timer: crate::timers::Timer,
 }
 
 impl Item for ContextMenu {
@@ -1615,30 +1610,6 @@ impl Item for ContextMenu {
                 self.show.call(&(LogicalPosition::from_euclid(*position),));
                 InputEventResult::EventAccepted
             }
-            #[cfg(target_os = "android")]
-            MouseEvent::Pressed { position, button: PointerEventButton::Left, .. } => {
-                let self_weak = _self_rc.downgrade();
-                let position = *position;
-                let ctx = WindowInner::from_pub(_window_adapter.window()).context();
-                self.long_press_timer.start_on(
-                    ctx,
-                    crate::timers::TimerMode::SingleShot,
-                    ctx.platform().long_press_interval(crate::InternalToken),
-                    move || {
-                        let Some(self_rc) = self_weak.upgrade() else { return };
-                        let Some(self_) = self_rc.downcast::<ContextMenu>() else { return };
-                        self_.show.call(&(LogicalPosition::from_euclid(position),));
-                    },
-                );
-                InputEventResult::GrabMouse
-            }
-            #[cfg(target_os = "android")]
-            MouseEvent::Released { .. } | MouseEvent::Exit => {
-                self.long_press_timer.stop();
-                InputEventResult::EventIgnored
-            }
-            #[cfg(target_os = "android")]
-            MouseEvent::Moved { .. } => InputEventResult::EventAccepted,
             _ => InputEventResult::EventIgnored,
         }
     }
@@ -1665,7 +1636,6 @@ impl Item for ContextMenu {
         fn is_menu_key(event: &InternalKeyEvent) -> bool {
             #[allow(unused_mut)]
             let mut is_menu_key = event.key_event.text.contains(crate::input::key_codes::Menu);
-            #[cfg(target_os = "windows")]
             {
                 // Windows maps Shift + F10 to open the context menu
                 is_menu_key |= event.key_event.text.contains(crate::input::key_codes::F10)
@@ -2074,7 +2044,6 @@ declare_item_vtable! {
     fn slint_get_ClippedImageVTable() -> ClippedImageVTable for ClippedImage
 }
 
-#[cfg(feature = "path")]
 declare_item_vtable! {
     fn slint_get_PathVTable() -> PathVTable for Path
 }
@@ -2300,8 +2269,8 @@ declare_item_vtable! {
 
 /// Expands to a builtin struct field's declared default value,
 /// or to the zero value of the field's type when no default is declared.
-/// Number literals for `Coord` fields are cast, because `Coord` is `f32` or `i32`
-/// depending on `cfg(slint_int_coord)`.
+/// Number literals for `Coord` fields are cast, because a declared default may be an
+/// integer literal while `Coord` is `f32`.
 macro_rules! builtin_struct_field_default {
     (Coord, $default:expr) => {
         ($default) as Coord

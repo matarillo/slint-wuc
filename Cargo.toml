@@ -38,7 +38,6 @@ serde = { version = "1.0.163", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.96" }
 strum = { version = "0.28", default-features = false, features = ["derive"] }
 ttf-parser = { version = "0.25" }
-web-sys = { version = "0.3.72", default-features = false }
 raw-window-handle-06 = { package = "raw-window-handle", version = "0.6", features = ["alloc"] }
 
 # Note: We're migrating our unicode handling over to the icu family of crates.
@@ -47,12 +46,9 @@ raw-window-handle-06 = { package = "raw-window-handle", version = "0.6", feature
 unicode-segmentation = { version = "1.12.0" }
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 
-wgpu-29 = { package = "wgpu", version = "29.0.4", default-features = false }
-wgpu-30 = { package = "wgpu", version = "30", default-features = false }
 tr = { version = "0.1", default-features = false }
 fontique = { version = "0.12.0" }
 # Pinned to match parley's version
 skrifa = { version = "0.44" }
 windows = { version = "0.62" }
 lyon_path = { version = "1.0", default-features = false }
-objc2 = { version = "0.6.3" }

@@ -69,19 +69,7 @@ pub fn default_log_message(_arguments: core::fmt::Arguments) {
         feature = "log" => {
             log::debug!("{_arguments}");
         }
-        all(target_arch = "wasm32", not(target_os = "emscripten")) => {
-            use wasm_bindgen::prelude::*;
-            use std::string::ToString;
-
-            #[wasm_bindgen]
-            extern "C" {
-                #[wasm_bindgen(js_namespace = console)]
-                pub fn log(s: &str);
-            }
-
-            log(&_arguments.to_string());
-        }
-        feature = "std" => {
+        _ => {
             use std::io::Write;
             // We were seeing intermittent, albeit very rare, crashes due to `eprintln` panicking
             // if the write to stderr fails. Since this is just for debug printing, it's safe
@@ -89,13 +77,11 @@ pub fn default_log_message(_arguments: core::fmt::Arguments) {
             // anyway)
             let _ = writeln!(std::io::stderr(), "{_arguments}");
         }
-        _ => {}
     }
 }
 
 #[macro_export]
 /// This macro allows producing debug output that will appear on stderr in regular builds
-/// and in the console log for wasm builds.
 macro_rules! debug_log {
     ($($t:tt)*) => ($crate::debug_log::log_message(
         $crate::debug_log::LogMessage::new(

@@ -3,8 +3,6 @@
 
 use crate::animations::Instant;
 use crate::animations::simulations::{PositionSimulation, Simulation};
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
 
 /// Slows down from a speed, and stops after a distance.
 /// Without a retarget, the speed follows a smoothstep curve down to zero.

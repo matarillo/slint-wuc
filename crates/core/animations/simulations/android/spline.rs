@@ -10,8 +10,6 @@
 //! the caller
 
 use core::time::Duration;
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
 
 const RATE: f32 = 2.3582017; // ln(0.78) / ln(0.9)
 const PHYSICAL_COEFFICIENT: f32 = 9.80665 * 39.37 * 160.0 * 0.84;

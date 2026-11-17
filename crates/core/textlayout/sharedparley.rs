@@ -347,7 +347,6 @@ fn with_render_text_layout<R>(
     )
 }
 
-#[cfg(feature = "std")]
 pub fn link_under_cursor(
     scale_factor: ScaleFactor,
     text: Pin<&dyn crate::item_rendering::RenderText>,
@@ -366,7 +365,6 @@ pub fn link_under_cursor(
 /// The byte offset into the raw text of the character under `cursor`,
 /// or of the nearest one on that line.
 /// `None` when nothing is laid out there.
-#[cfg(feature = "std")]
 pub fn byte_offset_under_cursor(
     scale_factor: ScaleFactor,
     text: Pin<&dyn crate::item_rendering::RenderText>,

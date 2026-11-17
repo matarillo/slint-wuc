@@ -4,8 +4,7 @@
 //! System tray integration.
 //!
 //! This module hosts the `SystemTrayIcon` native item (the element exposed to `.slint`) and
-//! wraps the platform-specific tray icon backends: `ksni` on Linux/BSD, AppKit
-//! (`NSStatusBar` / `NSStatusItem`) on macOS, and `Shell_NotifyIconW` on Windows.
+//! wraps the tray icon backend: `Shell_NotifyIconW` on Windows.
 
 #![allow(unsafe_code)]
 
@@ -30,22 +29,12 @@ use const_field_offset::FieldOffsets;
 use core::pin::Pin;
 use i_slint_core_macros::*;
 
-// Pick the per-platform tray backend. The `dummy` arm catches anything without a
-// real native tray (the `system-tray` feature is off, or Android, WASM, embedded
-// targets, …) so a `SystemTrayIcon`-rooted component constructs without surfacing
-// an icon to any host shell.
+// Pick the tray backend. The `dummy` arm catches the `system-tray` feature being off, so
+// a `SystemTrayIcon`-rooted component constructs without surfacing an icon to the shell.
 core::cfg_select! {
-    all(feature = "system-tray", target_os = "macos") => {
-        mod appkit;
-        use self::appkit::PlatformTray;
-    }
-    all(feature = "system-tray", target_os = "windows") => {
+    feature = "system-tray" => {
         mod windows;
         use self::windows::PlatformTray;
-    }
-    all(feature = "system-tray", target_family = "unix", not(target_vendor = "apple"), not(target_os = "android")) => {
-        mod ksni;
-        use self::ksni::PlatformTray;
     }
     _ => {
         mod dummy;

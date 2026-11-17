@@ -29,7 +29,7 @@ use const_field_offset::FieldOffsets;
 use core::pin::Pin;
 use i_slint_core_macros::*;
 
-#[cfg(all(feature = "image-decoders", any(not(target_arch = "wasm32"), target_os = "emscripten")))]
+#[cfg(feature = "image-decoders")]
 mod animation;
 
 #[repr(C)]
@@ -372,10 +372,7 @@ impl ItemConsts for ClippedImage {
 
 #[derive(Default)]
 struct ImageAnimationSlot(
-    #[cfg(all(
-        feature = "image-decoders",
-        any(not(target_arch = "wasm32"), target_os = "emscripten")
-    ))]
+    #[cfg(feature = "image-decoders")]
     core::cell::RefCell<Option<Pin<Rc<animation::ImageAnimation>>>>,
 );
 
@@ -383,10 +380,7 @@ fn current_frame(
     animation: &OnceBox<ImageAnimationSlot>,
     source: crate::graphics::Image,
 ) -> crate::graphics::Image {
-    #[cfg(all(
-        feature = "image-decoders",
-        any(not(target_arch = "wasm32"), target_os = "emscripten")
-    ))]
+    #[cfg(feature = "image-decoders")]
     {
         use crate::graphics::{ImageInner, NineSliceImage};
         let (inner, nine_slice_edges) = match &source.0 {
@@ -415,10 +409,7 @@ fn current_frame(
 
 fn stop(animation: &OnceBox<ImageAnimationSlot>) {
     if let Some(_slot) = animation.get() {
-        #[cfg(all(
-            feature = "image-decoders",
-            any(not(target_arch = "wasm32"), target_os = "emscripten")
-        ))]
+        #[cfg(feature = "image-decoders")]
         _slot.0.borrow_mut().take();
     }
 }

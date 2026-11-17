@@ -6,9 +6,6 @@
 #[cfg(test)]
 use crate::animations::simulations::assert_approx_eq;
 
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
-
 /// Converts a springs configuration into the `(natural_frequency, damping_ratio)` pair
 /// that the `SpringSimulation` solves the ODE with.
 pub trait SpringParameters {

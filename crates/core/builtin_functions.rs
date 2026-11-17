@@ -22,8 +22,6 @@ use crate::styled_text::StyledText;
 use crate::window::WindowAdapterRc;
 use crate::{SharedString, SlintContext, date_time};
 use core::pin::Pin;
-#[cfg(not(feature = "std"))]
-use num_traits::float::Float;
 use num_traits::ops::euclid::Euclid;
 use vtable::HasStaticVTable;
 
@@ -105,7 +103,6 @@ fn with_window_adapter<R: Default>(item: &ItemRc, f: impl FnOnce(&WindowAdapterR
     window_adapter.map(|window_adapter| f(&window_adapter)).unwrap_or_default()
 }
 
-#[cfg(feature = "path")]
 use crate::items::Path;
 
 i_slint_common::for_each_builtin_function!(builtin_functions);

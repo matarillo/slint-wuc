@@ -217,97 +217,19 @@ fn format_translation(
     output
 }
 
-#[cfg(all(target_family = "unix", feature = "gettext-rs"))]
-fn translate_gettext(
-    string: &str,
-    ctx: &str,
-    domain: &str,
-    n: i32,
-    plural: &str,
-) -> std::string::String {
-    use std::string::String;
-    fn mangle_context(ctx: &str, s: &str) -> String {
-        std::format!("{ctx}\u{4}{s}")
-    }
-    fn demangle_context(r: String) -> String {
-        if let Some(x) = r.split('\u{4}').next_back() {
-            return x.into();
-        }
-        r
-    }
-
-    if plural.is_empty() {
-        if !ctx.is_empty() {
-            demangle_context(gettextrs::dgettext(domain, mangle_context(ctx, string)))
-        } else {
-            gettextrs::dgettext(domain, string)
-        }
-    } else if !ctx.is_empty() {
-        demangle_context(gettextrs::dngettext(
-            domain,
-            mangle_context(ctx, string),
-            mangle_context(ctx, plural),
-            n as u32,
-        ))
-    } else {
-        gettextrs::dngettext(domain, string, plural, n as u32)
-    }
-}
-
 /// Mark the translations of the thread's context dirty, so they're translated again.
 ///
 /// For callers that have no component to get a context from.
 /// See [`crate::SlintContext::mark_translations_dirty`].
 pub fn mark_all_translations_dirty() {
-    match crate::SlintContext::current() {
-        Some(ctx) => ctx.mark_translations_dirty(),
-        None => invalidate_gettext_cache(),
-    }
-}
-
-/// gettext's cache is process-wide, so this affects every context.
-fn invalidate_gettext_cache() {
-    // _nl_msg_cat_cntr is defined by glibc and the standalone GNU libintl, but not by musl,
-    // which provides its own gettext implementation without that cache counter.
-    #[cfg(all(feature = "gettext-rs", target_family = "unix", not(target_env = "musl")))]
-    {
-        // SAFETY: This trick from https://www.gnu.org/software/gettext/manual/html_node/gettext-grok.html
-        // is merely incrementing a generational counter that will invalidate gettext's internal cache for translations.
-        // If in the worst case it won't invalidate, then old translations are shown.
-        #[allow(unsafe_code)]
-        unsafe {
-            unsafe extern "C" {
-                static mut _nl_msg_cat_cntr: std::ffi::c_int;
-            }
-            _nl_msg_cat_cntr += 1;
-        }
+    if let Some(ctx) = crate::SlintContext::current() {
+        ctx.mark_translations_dirty();
     }
 }
 
 #[cfg(feature = "gettext-rs")]
-/// Initialize the translation by calling the [`bindtextdomain`](https://man7.org/linux/man-pages/man3/bindtextdomain.3.html) function from gettext
-///
-/// The first call also sets the C library's `LC_MESSAGES` locale from the environment,
-/// so it must happen before other threads use the C locale.
+/// Stand-in for gettext's `bindtextdomain`, which only exists on Unix: it does nothing on Windows.
 pub fn gettext_bindtextdomain(_domain: &str, _dirname: std::path::PathBuf) -> std::io::Result<()> {
-    #[cfg(target_family = "unix")]
-    {
-        gettextrs::bindtextdomain(_domain, _dirname)?;
-        // gettext otherwise converts to the locale's character set, and gettext-rs panics on non-UTF-8.
-        gettextrs::bind_textdomain_codeset(_domain, "UTF-8")?;
-        static START: std::sync::Once = std::sync::Once::new();
-        START.call_once(|| {
-            // gettext doesn't translate in the "C" locale that a process starts with.
-            // SAFETY: Setting the C locale isn't thread-safe; the caller runs this before other
-            // threads use it.
-            #[allow(unsafe_code)]
-            unsafe {
-                gettextrs::setlocale(gettextrs::LocaleCategory::LcMessages, "");
-            }
-        });
-
-        mark_all_translations_dirty();
-    }
     Ok(())
 }
 
@@ -362,7 +284,6 @@ fn set_bundled_languages_impl(
 ) {
     if ctx.0.translations_bundle.borrow().is_none() {
         let translations = translations();
-        #[cfg(feature = "std")]
         if let Some(idx) = language_index_from_sys_locale(&translations) {
             ctx.0.as_ref().project_ref().translations_dirty.set(idx);
         }
@@ -371,7 +292,6 @@ fn set_bundled_languages_impl(
 }
 
 /// attempt to select the right bundled translation based on the current system locale
-#[cfg(feature = "std")]
 fn language_index_from_sys_locale(languages: &BundledLanguages) -> Option<usize> {
     let locale = sys_locale::get_locale()?;
     // first, try an exact match
@@ -425,7 +345,7 @@ impl crate::SlintContext {
         #![allow(unused)]
         // Register a dependency so that language changes trigger a re-evaluation of all relevant bindings
         // and this function is called again.
-        #[cfg(any(feature = "tr", all(target_family = "unix", feature = "gettext-rs")))]
+        #[cfg(feature = "tr")]
         self.language_index();
 
         let mut translated: Option<alloc::borrow::Cow<'_, str>> = None;
@@ -440,13 +360,6 @@ impl crate::SlintContext {
                     external_translator.ntranslate(n, original, plural, context).into_owned().into()
                 })
             };
-        }
-
-        #[cfg(all(target_family = "unix", feature = "gettext-rs"))]
-        if translated.is_none() {
-            translated = Some(alloc::borrow::Cow::Owned(translate_gettext(
-                original, contextid, domain, n, plural,
-            )));
         }
 
         let translated = translated.unwrap_or_else(|| untranslated(original, n, plural).into());
@@ -578,16 +491,8 @@ impl crate::SlintContext {
 
     /// Translate this context's strings again, for example after the translation files changed.
     pub fn mark_translations_dirty(&self) {
-        invalidate_gettext_cache();
         let pinned = self.0.as_ref().project_ref();
         pinned.translations_dirty.mark_dirty();
-
-        #[cfg(all(feature = "gettext-rs", target_family = "unix"))]
-        if let Some(locale) = sys_locale::get_locale() {
-            pinned
-                .locale_decimal_separator
-                .set(i_slint_common::decimal_separator_for_locale(&locale))
-        }
     }
 }
 
@@ -620,7 +525,6 @@ impl core::fmt::Display for SelectBundledTranslationError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for SelectBundledTranslationError {}
 
 #[cfg(feature = "ffi")]
@@ -731,7 +635,6 @@ mod ffi {
 }
 
 #[test]
-#[cfg(feature = "std")]
 fn test_bundled_translations_per_context() {
     use crate::testing::NoWindowPlatform as TestPlatform;
     let languages = || [("".into(), '.'), ("fr".into(), ',')];

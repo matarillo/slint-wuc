@@ -9,25 +9,16 @@ Animated GIF, PNG and WebP images, decoded one frame at a time.
 
 use super::{Image, ImageCacheKey, ImageInner, IntSize, OpaqueImage, SharedImageBuffer};
 
-#[cfg(all(
-    feature = "image-decoders",
-    any(not(target_arch = "wasm32"), target_os = "emscripten")
-))]
+#[cfg(feature = "image-decoders")]
 pub(crate) use decoding::{Frame, FrameDecoder};
-#[cfg(all(
-    feature = "image-decoders",
-    any(not(target_arch = "wasm32"), target_os = "emscripten")
-))]
+#[cfg(feature = "image-decoders")]
 pub(super) use decoding::{can_animate, load};
 
 /// An image with more than one frame.
 pub struct AnimatedImage {
     cache_key: ImageCacheKey,
     first_frame: SharedImageBuffer,
-    #[cfg(all(
-        feature = "image-decoders",
-        any(not(target_arch = "wasm32"), target_os = "emscripten")
-    ))]
+    #[cfg(feature = "image-decoders")]
     source: decoding::Source,
 }
 
@@ -39,15 +30,9 @@ impl PartialEq for AnimatedImage {
         if self.cache_key != ImageCacheKey::Invalid || other.cache_key != ImageCacheKey::Invalid {
             return self.cache_key == other.cache_key;
         }
-        #[cfg(all(
-            feature = "image-decoders",
-            any(not(target_arch = "wasm32"), target_os = "emscripten")
-        ))]
+        #[cfg(feature = "image-decoders")]
         return self.source.data() == other.source.data();
-        #[cfg(not(all(
-            feature = "image-decoders",
-            any(not(target_arch = "wasm32"), target_os = "emscripten")
-        )))]
+        #[cfg(not(feature = "image-decoders"))]
         false
     }
 }
@@ -69,20 +54,11 @@ impl AnimatedImage {
         &self.first_frame
     }
 
-    #[cfg(any(
-        feature = "image-decoders",
-        all(target_arch = "wasm32", not(target_os = "emscripten"), feature = "std")
-    ))]
+    #[cfg(feature = "image-decoders")]
     pub(crate) fn weight_in_bytes(&self) -> usize {
-        #[cfg(all(
-            feature = "image-decoders",
-            any(not(target_arch = "wasm32"), target_os = "emscripten")
-        ))]
+        #[cfg(feature = "image-decoders")]
         let encoded = self.source.heap_size();
-        #[cfg(not(all(
-            feature = "image-decoders",
-            any(not(target_arch = "wasm32"), target_os = "emscripten")
-        )))]
+        #[cfg(not(feature = "image-decoders"))]
         let encoded = 0;
         super::cache::buffer_weight(&self.first_frame) + encoded
     }
@@ -97,7 +73,7 @@ impl OpaqueImage for AnimatedImage {
     }
 }
 
-#[cfg(all(feature = "image-decoders", any(not(target_arch = "wasm32"), target_os = "emscripten")))]
+#[cfg(feature = "image-decoders")]
 mod decoding {
     use super::super::ImageData;
     use super::super::{Rgb8Pixel, Rgba8Pixel, SharedPixelBuffer};

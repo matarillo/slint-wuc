@@ -253,12 +253,6 @@ pub(crate) fn single_shot_on(
 impl Drop for Timer {
     fn drop(&mut self) {
         if let Some((timers, slot)) = self.started() {
-            #[cfg(target_os = "android")]
-            if timers.borrow().timers.is_empty() {
-                // There seems to be a bug in android thread_local where try_with recreates the already thread local.
-                // But we are called from the drop of another thread local, just ignore the drop then
-                return;
-            }
             let callback = timers.borrow_mut().remove_timer(slot);
             // drop the callback without having the list borrowed
             drop(callback);

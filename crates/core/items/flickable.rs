@@ -11,7 +11,6 @@ use super::{
     VoidArg,
 };
 use crate::animations::Instant;
-use crate::animations::simulations::ease_in_out_sine::EaseInOutSine;
 use crate::animations::simulations::rubber_band;
 use crate::animations::simulations::spring::SpringPhysicalParameters;
 use crate::animations::simulations::spring_flick::SpringFlick;
@@ -25,17 +24,7 @@ use crate::input::{InternalKeyEvent, TouchHistory};
 use crate::item_rendering::CachedRenderingData;
 use crate::item_tree::ItemWeak;
 use crate::items::ScrollBehavior;
-#[cfg(not(any(
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "none",
-    target_os = "macos"
-)))]
 use crate::items::flickable::velocity_tracker::GeneralVelocityTracker;
-#[cfg(any(target_os = "ios", target_os = "linux", target_os = "none"))]
-use crate::items::flickable::velocity_tracker::IOsVelocityTracker;
-#[cfg(target_os = "macos")]
-use crate::items::flickable::velocity_tracker::MacOsVelocityTracker;
 use crate::items::flickable::velocity_tracker::{Velocity, VelocityTracker as _};
 use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{
@@ -67,7 +56,6 @@ use animation::{FlickAnimation, FlickAnimationParameter};
 /// information to derive a fling velocity.
 /// The unit is: millisecond
 const WHEEL_SCROLL_DURATION: Duration = Duration::from_millis(180);
-#[cfg(not(any(target_os = "ios", target_os = "linux", target_os = "none", target_os = "macos")))]
 const VELOCITY_TRACKER_SAMPLES: usize = 20;
 /// How long a pause between two tracked move samples is still considered part of the same
 /// flick
@@ -77,15 +65,7 @@ const MOMENTUM_RETAIN_TIMEOUT: Duration = Duration::from_millis(100);
 // https://github.com/androidx/androidx/blob/6c35dc9bdc74b5521a03319c5d98dc4dcfc3a4f9/compose/animation/animation-core/src/commonMain/kotlin/androidx/compose/animation/core/AnimationSpec.kt#L144-L145
 // https://github.com/androidx/androidx/blob/6c35dc9bdc74b5521a03319c5d98dc4dcfc3a4f9/compose/foundation/foundation/src/commonMain/kotlin/androidx/compose/foundation/Scroll.kt#L203-L205
 const ANDROID_SCROLL_TO_STIFFNESS: f32 = 1500.;
-// Measured on an iPhone
-const UIKIT_SCROLL_TO_DURATION: Duration = Duration::from_millis(300);
 
-// Linux and bare metal use the iOS tracker, which is cheaper than the least-squares fit.
-#[cfg(any(target_os = "ios", target_os = "linux", target_os = "none"))]
-type VelocityTracker = IOsVelocityTracker;
-#[cfg(target_os = "macos")]
-type VelocityTracker = MacOsVelocityTracker;
-#[cfg(not(any(target_os = "ios", target_os = "linux", target_os = "none", target_os = "macos")))]
 type VelocityTracker = GeneralVelocityTracker<VELOCITY_TRACKER_SAMPLES>;
 
 #[derive(Clone, Copy)]
@@ -479,10 +459,7 @@ impl Flickable {
 }
 
 /// The distance required before it starts flicking if there is another item intercepting the mouse.
-#[cfg(not(target_os = "ios"))]
 pub(super) const DISTANCE_THRESHOLD: LogicalLength = LogicalLength::new(8 as _);
-#[cfg(target_os = "ios")]
-pub(super) const DISTANCE_THRESHOLD: LogicalLength = LogicalLength::new(10 as _);
 /// Time required before we stop caring about child event if the mouse hasn't been moved
 pub(super) const DURATION_THRESHOLD: Duration = Duration::from_millis(500);
 /// The delay to which press are forwarded to the inner item
@@ -1189,21 +1166,14 @@ impl FlickableDataInner {
             let flick_velocity = 1f32.copysign(-deflection);
             let limit = FlickableDataInner::flick_limits(flick_rc, flick_velocity, dimension);
 
-            Some(if cfg!(target_os = "ios") {
-                Self::set_simulation(
-                    &content,
-                    EaseInOutSine::new(-deflection, UIKIT_SCROLL_TO_DURATION, limit),
-                )
-            } else {
-                Self::set_simulation(
-                    &content,
-                    SpringFlick::new(
-                        deflection,
-                        limit,
-                        SpringPhysicalParameters::new_critical_damped(ANDROID_SCROLL_TO_STIFFNESS),
-                    ),
-                )
-            })
+            Some(Self::set_simulation(
+                &content,
+                SpringFlick::new(
+                    deflection,
+                    limit,
+                    SpringPhysicalParameters::new_critical_damped(ANDROID_SCROLL_TO_STIFFNESS),
+                ),
+            ))
         };
 
         let x_simulation = simulation(deflection_x as f32, Dimension::X);
@@ -1232,11 +1202,8 @@ impl FlickableData {
         delta_x: Coord,
         delta_y: Coord,
     ) -> LogicalVector {
-        if window_adapter.window().0.context().modifiers().get().shift()
-            && !cfg!(target_os = "macos")
-        {
+        if window_adapter.window().0.context().modifiers().get().shift() {
             // Shift invert coordinate for the purpose of scrolling.
-            // But not on macOs because there the OS already take care of the change
             LogicalVector::new(delta_y, delta_x)
         } else {
             LogicalVector::new(delta_x, delta_y)

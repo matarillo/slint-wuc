@@ -12,9 +12,6 @@ use crate::SharedVector;
 use alloc::string::String;
 use core::fmt::{Debug, Display, Write};
 use core::ops::Deref;
-#[cfg(not(feature = "std"))]
-#[allow(unused)]
-use num_traits::Float;
 
 /// This macro is the same as [`std::format!`], but it returns a [`SharedString`] instead.
 ///
@@ -186,7 +183,6 @@ impl<'de> serde::Deserialize<'de> for SharedString {
     }
 }
 
-#[cfg(feature = "std")]
 impl AsRef<std::ffi::CStr> for SharedString {
     #[inline]
     fn as_ref(&self) -> &std::ffi::CStr {
@@ -199,7 +195,6 @@ impl AsRef<std::ffi::CStr> for SharedString {
     }
 }
 
-#[cfg(feature = "std")]
 impl AsRef<std::path::Path> for SharedString {
     #[inline]
     fn as_ref(&self) -> &std::path::Path {
@@ -207,7 +202,6 @@ impl AsRef<std::path::Path> for SharedString {
     }
 }
 
-#[cfg(feature = "std")]
 impl AsRef<std::ffi::OsStr> for SharedString {
     #[inline]
     fn as_ref(&self) -> &std::ffi::OsStr {
@@ -443,7 +437,6 @@ pub fn parse_number(sep: char, string: &str) -> Option<f32> {
 }
 
 #[test]
-#[cfg(feature = "std")]
 fn test_number_formatting_per_context() {
     use crate::testing::NoWindowPlatform as TestPlatform;
 

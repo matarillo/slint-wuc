@@ -7,7 +7,6 @@
 use alloc::rc::Rc;
 use core::any::Any;
 
-#[cfg(feature = "std")]
 use crate::SharedVector;
 use crate::{SharedString, api::Image};
 
@@ -29,7 +28,6 @@ struct DataTransferInner {
     plain_text: Option<SharedString>,
     /// Special-cased support for files, as platforms transfer them as URLs or
     /// native path lists. Stored as local filesystem paths.
-    #[cfg(feature = "std")]
     file_paths: Option<SharedVector<std::path::PathBuf>>,
 }
 
@@ -84,7 +82,6 @@ impl core::fmt::Debug for DataTransfer {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let mut s = f.debug_struct("DataTransfer");
         s.field("has_plain_text", &self.has_plain_text()).field("has_image", &self.has_image());
-        #[cfg(feature = "std")]
         s.field("has_file_paths", &self.has_file_paths());
         s.field("has_user_data", &self.user_data.is_some());
         s.finish()
@@ -202,7 +199,6 @@ impl DataTransfer {
     /// let mut transfer = DataTransfer::default();
     /// transfer.set_file_paths(["/home/user/a.txt", "/home/user/b.png"]);
     /// ```
-    #[cfg(feature = "std")]
     pub fn set_file_paths<I>(&mut self, file_paths: I) -> &mut Self
     where
         I: IntoIterator,
@@ -215,7 +211,6 @@ impl DataTransfer {
     }
 
     /// `set_file_paths` on the internal representation, for the FFI layer.
-    #[cfg(feature = "std")]
     fn set_file_paths_vec(&mut self, file_paths: SharedVector<std::path::PathBuf>) {
         if file_paths.is_empty() {
             self.clear_file_paths();
@@ -240,7 +235,6 @@ impl DataTransfer {
         self.release_empty_inner();
     }
 
-    #[cfg(feature = "std")]
     fn clear_file_paths(&mut self) {
         let Some(inner_rc) = self.inner.as_mut() else { return };
         if inner_rc.file_paths.is_some() {
@@ -287,7 +281,6 @@ impl DataTransfer {
     ///
     /// This does not necessarily mean that `file_paths` will return `Ok`, as an I/O
     /// error may occur.
-    #[cfg(feature = "std")]
     pub fn has_file_paths(&self) -> bool {
         self.inner.as_ref().is_some_and(|inner| inner.file_paths.is_some())
     }
@@ -333,7 +326,6 @@ impl DataTransfer {
     /// The returned iterator borrows this `DataTransfer`.
     ///
     /// The caller should assume that this method call may do I/O.
-    #[cfg(feature = "std")]
     pub fn file_paths(
         &self,
     ) -> Result<impl Iterator<Item = &std::path::Path> + '_, DataTransferError> {

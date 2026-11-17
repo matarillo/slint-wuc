@@ -13,8 +13,6 @@ use crate::{
 };
 use alloc::rc::Weak;
 use euclid::Length;
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
 
 enum AnimationState {
     /// The animation will start after the delay is finished

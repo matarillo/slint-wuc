@@ -7,9 +7,6 @@ pub use skrifa;
 #[cfg(feature = "svg-text")]
 pub mod svg;
 
-#[cfg(any(target_family = "wasm", target_os = "nto"))]
-use fontique::ScriptExt;
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -26,11 +23,6 @@ pub fn system_collection(shared: bool) -> fontique::Collection {
     let create = || {
         fontique::Collection::new(fontique::CollectionOptions { shared, system_fonts: !cfg!(miri) })
     };
-    // Fontique's Foundation calls autorelease their results,
-    // and the calling thread may have no autorelease pool in place.
-    #[cfg(target_vendor = "apple")]
-    return objc2::rc::autoreleasepool(|_| create());
-    #[cfg(not(target_vendor = "apple"))]
     create()
 }
 
@@ -45,28 +37,6 @@ pub fn init_collection(mut collection: fontique::Collection, shared: bool) -> Co
     // bitmap-font emission both rely on this ordering rather than any later sort.
     let mut default_fonts: Vec<(std::path::PathBuf, fontique::QueryFont)> = Vec::new();
     let mut chain_families: Vec<fontique::FamilyId> = Vec::new();
-
-    #[cfg(any(target_family = "wasm", target_os = "nto"))]
-    {
-        let data = include_bytes!("sharedfontique/Inter-VariableFont.ttf");
-        let fonts = collection.register_fonts(fontique::Blob::new(Arc::new(data)), None);
-        for script in fontique::Script::all_samples().iter().map(|(script, _)| *script) {
-            collection.append_fallbacks(
-                fontique::FallbackKey::new(script, None),
-                fonts.iter().map(|(family_id, _)| *family_id),
-            );
-        }
-        for generic_family in [
-            fontique::GenericFamily::SansSerif,
-            fontique::GenericFamily::SystemUi,
-            fontique::GenericFamily::UiSansSerif,
-        ] {
-            collection.append_generic_families(
-                generic_family,
-                fonts.iter().map(|(family_id, _)| *family_id),
-            );
-        }
-    }
 
     let mut registered_paths: HashSet<std::path::PathBuf> = HashSet::new();
     let mut register_path =

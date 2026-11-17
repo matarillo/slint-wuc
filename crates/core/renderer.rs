@@ -6,7 +6,6 @@ use alloc::rc::Rc;
 use core::pin::Pin;
 
 use crate::api::PlatformError;
-#[cfg(feature = "std")]
 use crate::graphics::{Rgba8Pixel, SharedPixelBuffer};
 use crate::item_tree::ItemTreeRef;
 use crate::items::{ItemRc, TextWrap};
@@ -306,7 +305,7 @@ pub trait RendererSealed {
     /// Example: when a PopupWindow disappears, the region under the popup needs to be redrawn
     fn mark_dirty_region(&self, _region: crate::partial_renderer::DirtyRegion) {}
 
-    #[cfg(all(feature = "std", not(feature = "shared-parley")))] // FIXME: just because of the Error
+    #[cfg(not(feature = "shared-parley"))] // FIXME: just because of the Error
     /// This function can be used to register a custom TrueType font with Slint,
     /// for use with the `font-family` property. The provided slice must be a valid TrueType
     /// font.
@@ -317,7 +316,7 @@ pub trait RendererSealed {
         Err("This renderer does not support registering custom fonts.".into())
     }
 
-    #[cfg(all(feature = "std", feature = "shared-parley"))]
+    #[cfg(feature = "shared-parley")]
     /// This function can be used to register a custom TrueType font with Slint,
     /// for use with the `font-family` property. The provided slice must be a valid TrueType
     /// font.
@@ -332,7 +331,7 @@ pub trait RendererSealed {
         Ok(())
     }
 
-    #[cfg(all(feature = "std", not(feature = "shared-parley")))]
+    #[cfg(not(feature = "shared-parley"))]
     /// This function can be used to register a custom TrueType font with Slint,
     /// for use with the `font-family` property. The provided path must refer to a valid TrueType
     /// font.
@@ -343,7 +342,7 @@ pub trait RendererSealed {
         Err("This renderer does not support registering custom fonts.".into())
     }
 
-    #[cfg(all(feature = "std", feature = "shared-parley"))]
+    #[cfg(feature = "shared-parley")]
     /// This function can be used to register a custom TrueType font with Slint,
     /// for use with the `font-family` property. The provided path must refer to a valid TrueType
     /// font.
@@ -404,7 +403,6 @@ pub trait RendererSealed {
 
     /// Re-implement this function to support Window::take_snapshot(), i.e. return
     /// the contents of the window in an image buffer.
-    #[cfg(feature = "std")]
     fn take_snapshot(&self) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
         Err("WindowAdapter::take_snapshot is not implemented by the platform".into())
     }

@@ -383,12 +383,10 @@ mod current_binding_storage {
     use super::BindingHolder;
     use core::cell::Cell;
 
-    #[cfg(feature = "std")]
     std::thread_local! {
         static CURRENT_BINDING: Cell<*const BindingHolder> = const { Cell::new(core::ptr::null()) };
     }
 
-    #[cfg(feature = "std")]
     pub(super) fn set<T>(value: Option<*const BindingHolder>, f: impl FnOnce() -> T) -> T {
         CURRENT_BINDING.with(|cell| {
             let old = cell.replace(value.unwrap_or(core::ptr::null()));
@@ -398,37 +396,11 @@ mod current_binding_storage {
         })
     }
 
-    #[cfg(feature = "std")]
     pub(super) fn with<T>(f: impl FnOnce(Option<*const BindingHolder>) -> T) -> T {
         CURRENT_BINDING.with(|cell| {
             let ptr = cell.get();
             f(if ptr.is_null() { None } else { Some(ptr) })
         })
-    }
-
-    #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-    static CURRENT_BINDING: ScopedRawPtr = ScopedRawPtr(Cell::new(core::ptr::null()));
-
-    #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-    struct ScopedRawPtr(Cell<*const BindingHolder>);
-    // Safety: the unsafe_single_threaded feature means only one thread accesses this
-    #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-    unsafe impl Send for ScopedRawPtr {}
-    #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-    unsafe impl Sync for ScopedRawPtr {}
-
-    #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-    pub(super) fn set<T>(value: Option<*const BindingHolder>, f: impl FnOnce() -> T) -> T {
-        let old = CURRENT_BINDING.0.replace(value.unwrap_or(core::ptr::null()));
-        let res = f();
-        CURRENT_BINDING.0.set(old);
-        res
-    }
-
-    #[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-    pub(super) fn with<T>(f: impl FnOnce(Option<*const BindingHolder>) -> T) -> T {
-        let ptr = CURRENT_BINDING.0.get();
-        f(if ptr.is_null() { None } else { Some(ptr) })
     }
 }
 

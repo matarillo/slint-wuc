@@ -6,8 +6,6 @@
 
 use alloc::boxed::Box;
 use core::{cell::Cell, time::Duration};
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
 
 pub(crate) mod simulations;
 
@@ -514,7 +512,6 @@ pub fn update_animations(now: Instant) {
 }
 
 pub(crate) fn slow_down_factor() -> u32 {
-    #[cfg(feature = "std")]
     if let Ok(val) = std::env::var("SLINT_SLOW_ANIMATIONS") {
         return val.parse().unwrap_or(2).max(1);
     }

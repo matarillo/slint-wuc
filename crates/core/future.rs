@@ -1,7 +1,6 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
-#![cfg(target_has_atomic = "ptr")] // Arc is not available. TODO: implement using RawWaker
 #![warn(missing_docs)]
 
 //! This module contains the code that runs futures
@@ -28,22 +27,15 @@ struct FutureRunnerInner<T> {
 }
 
 struct FutureRunner<T> {
-    #[cfg(not(feature = "std"))]
-    inner: core::cell::RefCell<FutureRunnerInner<T>>,
-    #[cfg(feature = "std")]
     inner: std::sync::Mutex<FutureRunnerInner<T>>,
     aborted: atomic::AtomicBool,
     proxy: Box<dyn crate::platform::EventLoopProxy>,
-    #[cfg(feature = "std")]
     thread: std::thread::ThreadId,
 }
 
 impl<T> FutureRunner<T> {
     fn inner(&self) -> impl DerefMut<Target = FutureRunnerInner<T>> + '_ {
-        #[cfg(feature = "std")]
-        return self.inner.lock().unwrap();
-        #[cfg(not(feature = "std"))]
-        return self.inner.borrow_mut();
+        self.inner.lock().unwrap()
     }
 }
 
@@ -60,7 +52,6 @@ unsafe impl<T> Sync for FutureRunner<T> {}
 impl<T: 'static> Wake for FutureRunner<T> {
     fn wake(self: alloc::sync::Arc<Self>) {
         self.clone().proxy.invoke_from_event_loop(Box::new(move || {
-            #[cfg(feature = "std")]
             assert_eq!(self.thread, std::thread::current().id(), "the future was moved to a thread despite we checked it was created in the event loop thread");
             let waker = self.clone().into();
             let mut inner = self.inner();
@@ -126,7 +117,6 @@ impl<T> JoinHandle<T> {
     }
 }
 
-#[cfg(feature = "std")]
 #[allow(unsafe_code)]
 // Safety: JoinHandle doesn't access the future, only the
 unsafe impl<T: Send> Send for JoinHandle<T> {}
@@ -137,7 +127,6 @@ pub(crate) fn spawn_local_with_ctx<F: Future + 'static>(
     fut: F,
 ) -> Result<JoinHandle<F::Output>, EventLoopError> {
     let arc = alloc::sync::Arc::new(FutureRunner {
-        #[cfg(feature = "std")]
         thread: std::thread::current().id(),
         inner: FutureRunnerInner { fut: FutureState::Running(Box::pin(fut)), wakers: Vec::new() }
             .into(),

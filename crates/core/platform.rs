@@ -11,18 +11,12 @@ use crate::SharedString;
 pub use crate::api::PlatformError;
 use crate::api::{LogicalPosition, LogicalSize};
 pub use crate::renderer::Renderer;
-#[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-use crate::unsafe_single_threaded::OnceCell;
 pub use crate::window::{LayoutConstraints, WindowAdapter, WindowProperties};
 use alloc::boxed::Box;
 use alloc::rc::Rc;
 use alloc::string::String;
-#[cfg(all(feature = "std", not(target_os = "android")))]
 use once_cell::sync::OnceCell;
-#[cfg(all(feature = "std", not(target_arch = "wasm32")))]
 use std::time;
-#[cfg(target_arch = "wasm32")]
-use web_time as time;
 
 /// This trait defines the interface between Slint and platform APIs typically provided by operating and windowing systems.
 pub trait Platform {
@@ -102,17 +96,10 @@ pub trait Platform {
     ///
     /// This is used by the animations and timer to compute the elapsed time.
     ///
-    /// When the `std` feature is enabled, this function is implemented in terms of
-    /// [`std::time::Instant::now()`], but on `#![no_std]` platform, this function must
-    /// be implemented.
+    /// This function is implemented in terms of [`std::time::Instant::now()`].
     fn duration_since_start(&self) -> core::time::Duration {
-        #[cfg(feature = "std")]
-        {
-            let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
-            time::Instant::now().saturating_duration_since(the_beginning)
-        }
-        #[cfg(not(feature = "std"))]
-        unimplemented!("The platform abstraction must implement `duration_since_start`")
+        let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
+        time::Instant::now().saturating_duration_since(the_beginning)
     }
 
     /// Returns the current interval to internal measure the duration to send a double click event.
@@ -157,13 +144,6 @@ pub trait Platform {
     fn open_url(&self, _url: &str) -> Result<(), PlatformError> {
         Err(PlatformError::Unsupported)
     }
-
-    #[cfg(target_os = "android")]
-    #[doc(hidden)]
-    /// The long press interval before showing a context menu
-    fn long_press_interval(&self, _: crate::InternalToken) -> core::time::Duration {
-        core::time::Duration::from_millis(500)
-    }
 }
 
 /// The clip board, used in [`Platform::clipboard_text`] and [Platform::set_clipboard_text`]
@@ -201,10 +181,8 @@ pub trait EventLoopProxy: Send + Sync {
     ) -> Result<(), crate::api::EventLoopError>;
 }
 
-#[cfg(feature = "std")]
 static INITIAL_INSTANT: once_cell::sync::OnceCell<time::Instant> = once_cell::sync::OnceCell::new();
 
-#[cfg(feature = "std")]
 impl std::convert::From<crate::animations::Instant> for time::Instant {
     fn from(our_instant: crate::animations::Instant) -> Self {
         let the_beginning = *INITIAL_INSTANT.get_or_init(time::Instant::now);
@@ -212,19 +190,10 @@ impl std::convert::From<crate::animations::Instant> for time::Instant {
     }
 }
 
-#[cfg(not(target_os = "android"))]
 static EVENTLOOP_PROXY: OnceCell<Box<dyn EventLoopProxy + 'static>> = OnceCell::new();
 
-// On android, we allow the platform to be reset and the global eventloop proxy to be replaced.
-#[cfg(target_os = "android")]
-static EVENTLOOP_PROXY: std::sync::Mutex<Option<Box<dyn EventLoopProxy + 'static>>> =
-    std::sync::Mutex::new(None);
-
 pub(crate) fn with_event_loop_proxy<R>(f: impl FnOnce(Option<&dyn EventLoopProxy>) -> R) -> R {
-    #[cfg(not(target_os = "android"))]
-    return f(EVENTLOOP_PROXY.get().map(core::ops::Deref::deref));
-    #[cfg(target_os = "android")]
-    return f(EVENTLOOP_PROXY.lock().unwrap().as_ref().map(core::ops::Deref::deref));
+    f(EVENTLOOP_PROXY.get().map(core::ops::Deref::deref))
 }
 
 /// This enum describes the different error scenarios that may occur when [`set_platform`]
@@ -258,14 +227,7 @@ pub fn set_platform(platform: Box<dyn Platform + 'static>) -> Result<(), SetPlat
             return Err(SetPlatformError::AlreadySet);
         }
         if let Some(proxy) = platform.new_event_loop_proxy() {
-            #[cfg(not(target_os = "android"))]
-            {
-                EVENTLOOP_PROXY.set(proxy).map_err(|_| SetPlatformError::AlreadySet)?;
-            }
-            #[cfg(target_os = "android")]
-            {
-                *EVENTLOOP_PROXY.lock().unwrap() = Some(proxy);
-            }
+            EVENTLOOP_PROXY.set(proxy).map_err(|_| SetPlatformError::AlreadySet)?;
         }
         // The slot is free, so this claims it. The returned handle is dropped here; the
         // context stays alive because the slot holds it.

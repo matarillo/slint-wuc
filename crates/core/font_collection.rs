@@ -4,14 +4,14 @@
 #[cfg(feature = "shared-parley")]
 use i_slint_common::sharedfontique;
 
-#[cfg(all(feature = "std", feature = "shared-parley"))]
+#[cfg(feature = "shared-parley")]
 #[allow(clippy::large_enum_variant)]
 enum Pending {
     Prefetching(std::thread::JoinHandle<sharedfontique::fontique::Collection>),
     Supplied(sharedfontique::fontique::Collection),
 }
 
-#[cfg(all(feature = "std", feature = "shared-parley"))]
+#[cfg(feature = "shared-parley")]
 crate::thread_local! {
     static PENDING: core::cell::RefCell<Option<Pending>> = const { core::cell::RefCell::new(None) };
 }
@@ -22,14 +22,14 @@ pub struct PrefetchGuard {
 
 impl Drop for PrefetchGuard {
     fn drop(&mut self) {
-        #[cfg(all(feature = "std", feature = "shared-parley"))]
+        #[cfg(feature = "shared-parley")]
         drop(PENDING.take());
     }
 }
 
 #[must_use = "the prefetched collection is discarded when the guard is dropped"]
 pub fn prefetch() -> Option<PrefetchGuard> {
-    #[cfg(all(feature = "std", feature = "shared-parley", not(target_family = "wasm")))]
+    #[cfg(feature = "shared-parley")]
     if crate::SlintContext::current().is_none() && PENDING.with_borrow(Option::is_none) {
         let worker = std::thread::Builder::new()
             .name("slint-font-collection".into())
@@ -41,7 +41,7 @@ pub fn prefetch() -> Option<PrefetchGuard> {
     None
 }
 
-#[cfg(all(feature = "std", feature = "shared-parley"))]
+#[cfg(feature = "shared-parley")]
 pub fn supply(
     collection: sharedfontique::fontique::Collection,
 ) -> Result<(), crate::api::PlatformError> {
@@ -56,7 +56,6 @@ pub fn supply(
 
 #[cfg(feature = "shared-parley")]
 pub(crate) fn take_or_create() -> sharedfontique::Collection {
-    #[cfg(feature = "std")]
     match PENDING.take() {
         Some(Pending::Prefetching(worker)) => {
             let collection = worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic));
@@ -75,7 +74,7 @@ pub(crate) fn take_or_create() -> sharedfontique::Collection {
     sharedfontique::create_collection(true)
 }
 
-#[cfg(all(test, feature = "std", feature = "shared-parley", not(target_family = "wasm")))]
+#[cfg(all(test, feature = "shared-parley"))]
 mod tests {
     #[test]
     #[cfg_attr(miri, ignore)]

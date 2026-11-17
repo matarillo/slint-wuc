@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 //! Fallback backend for builds without a real system tray (the `system-tray`
-//! feature is off, or Android, WASM, embedded targets, …). Handle creation
+//! feature is off). Handle creation
 //! fails with [`Error::Unsupported`], which the tray item reports through
 //! `debug_log`; the application keeps running without an icon.
 

@@ -11,35 +11,11 @@
 //! Estimates a pointer's fling velocity from a short history of positions,
 //! for use as the flickable's initial deceleration-animation velocity
 
-#[cfg(any(test, target_os = "ios", target_os = "linux", target_os = "none", target_os = "macos"))]
-mod fling;
-#[cfg(any(
-    test,
-    not(any(target_os = "ios", target_os = "linux", target_os = "none", target_os = "macos"))
-))]
 mod general;
-#[cfg(any(target_os = "ios", target_os = "linux", target_os = "none"))]
-mod ios;
-#[cfg(any(
-    test,
-    not(any(target_os = "ios", target_os = "linux", target_os = "none", target_os = "macos"))
-))]
 mod least_square;
-#[cfg(target_os = "macos")]
-mod macos;
 mod ring_buffer;
 
-#[cfg(not(any(
-    target_os = "ios",
-    target_os = "linux",
-    target_os = "none",
-    target_os = "macos"
-)))]
 pub(crate) use general::GeneralVelocityTracker;
-#[cfg(any(target_os = "ios", target_os = "linux", target_os = "none"))]
-pub(crate) use ios::IOsVelocityTracker;
-#[cfg(target_os = "macos")]
-pub(crate) use macos::MacOsVelocityTracker;
 
 use crate::animations::Instant;
 use crate::lengths::{LogicalPx, LogicalVector};

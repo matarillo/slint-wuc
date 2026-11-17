@@ -21,7 +21,6 @@ use crate::item_rendering::{
     RenderText,
 };
 use crate::item_tree::{ItemTreeRc, ItemTreeWeak, ItemVisitorResult};
-#[cfg(feature = "path")]
 use crate::items::Path;
 use crate::items::{
     BackdropBlur, BoxShadow, Clip, ItemRc, ItemRef, Layer, Opacity, RenderingResult, TextInput,
@@ -400,7 +399,6 @@ fn clipped_screen_rect(
 
 /// Map `rect` (relative to its parent) to screen space through `transform`.
 fn screen_rect(rect: &LogicalRect, transform: &ItemTransform) -> Option<LogicalRect> {
-    #[cfg(not(slint_int_coord))]
     if !rect.origin.is_finite() {
         // Account for NaN
         return None;
@@ -842,7 +840,6 @@ impl<T: ItemRenderer + ItemRendererFeatures> ItemRenderer for PartialRenderer<'_
     forward_rendering_call2!(fn draw_image(dyn RenderImage));
     forward_rendering_call2!(fn draw_text(dyn RenderText));
     forward_rendering_call!(fn draw_text_input(TextInput));
-    #[cfg(feature = "path")]
     forward_rendering_call!(fn draw_path(Path));
     forward_rendering_call!(fn draw_box_shadow(BoxShadow));
     forward_rendering_call!(fn draw_backdrop_blur(BackdropBlur));

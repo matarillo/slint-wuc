@@ -517,12 +517,6 @@ impl InternalKeyboardModifierState {
         // Winit sends the actual Ctrl/Alt/AltGr keypress correctly.
         // With winit we can detect whether ctrl+alt actually caused a AltGr conversion or not,
         // by checking whether the text_without_modifiers is different from the event text.
-        //
-        // ## Wasm
-        // Winit on the web for some reasons sends first a Ctrl and then AltGr event when only AltGr
-        // is pressed.
-        // So there we need to get rid of the additional Ctrl event whenever AltGr is pressed.
-        #[cfg(target_os = "windows")]
         {
             // Non-web windows (Usually winit or Qt)
             if !self.altgr && self.control() && self.alt() {
@@ -542,20 +536,6 @@ impl InternalKeyboardModifierState {
                     alt = false;
                     control = false;
                 }
-            }
-        }
-        #[cfg(target_family = "wasm")]
-        if crate::detect_operating_system() == OperatingSystemType::Windows {
-            // Non-native windows (e.g. Winit on the web)
-            // This currently injects additional Ctrl events, so remove those if AltGr is
-            // pressed.
-            let is_altgr = self.altgr
-                || (self.control()
-                    && self.alt()
-                    && _event.key_event.text.chars().any(|c| !c.is_ascii_alphanumeric()));
-            if is_altgr {
-                alt = false;
-                control = false;
             }
         }
 
@@ -1152,7 +1132,6 @@ pub struct InternalKeyEvent {
     /// vs. AltGr.
     /// This is optional, and we will fall back to a heuristic for Ctrl+Alt on Windows if this
     /// isn't provided.
-    #[cfg(target_os = "windows")]
     pub text_without_modifiers: SharedString,
     /// If the event type is KeyEventType::UpdateComposition or KeyEventType::CommitComposition,
     /// then this field specifies what part of the current text to replace.
@@ -1176,26 +1155,16 @@ impl InternalKeyEvent {
         let text = self.key_event.text.to_lowercase();
         if self.key_event.modifiers.control && !self.key_event.modifiers.shift {
             match text.as_str() {
-                #[cfg(not(target_arch = "wasm32"))]
                 "c" => Some(StandardShortcut::Copy),
-                #[cfg(not(target_arch = "wasm32"))]
                 "x" => Some(StandardShortcut::Cut),
-                #[cfg(not(target_arch = "wasm32"))]
                 "v" => Some(StandardShortcut::Paste),
                 "a" => Some(StandardShortcut::SelectAll),
                 "f" => Some(StandardShortcut::Find),
                 "s" => Some(StandardShortcut::Save),
                 "p" => Some(StandardShortcut::Print),
                 "z" => Some(StandardShortcut::Undo),
-                #[cfg(target_os = "windows")]
                 "y" => Some(StandardShortcut::Redo),
                 "r" => Some(StandardShortcut::Refresh),
-                _ => None,
-            }
-        } else if self.key_event.modifiers.control && self.key_event.modifiers.shift {
-            match text.as_str() {
-                #[cfg(not(target_os = "windows"))]
-                "z" => Some(StandardShortcut::Redo),
                 _ => None,
             }
         } else {
@@ -1241,7 +1210,6 @@ impl InternalKeyEvent {
             };
         }
 
-        #[cfg(not(target_os = "macos"))]
         {
             if ke.modifiers.control && !ke.modifiers.alt && !ke.modifiers.meta {
                 match keycode {
@@ -3299,14 +3267,7 @@ mod tests {
             use crate::alloc::string::ToString;
             let result = shortcut.to_string();
 
-            #[cfg(target_os = "macos")]
-            assert_eq!(result.as_str(), _expected_macos, "Failed for key: {:?}", key);
-
-            #[cfg(target_os = "windows")]
             assert_eq!(result.as_str(), _expected_windows, "Failed for key: {:?}", key);
-
-            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-            assert_eq!(result.as_str(), _expected_linux, "Failed for key: {:?}", key);
         }
     }
 

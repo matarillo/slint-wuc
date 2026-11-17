@@ -90,19 +90,15 @@ pub fn min_max_size_for_layout_constraints(
     let max_width = constraints_horizontal.max.max(constraints_horizontal.min) as f32;
     let max_height = constraints_vertical.max.max(constraints_vertical.min) as f32;
 
-    //cfg!(target_arch = "wasm32") is there because wasm32 winit don't like when max size is None:
-    // panicked at 'Property is read only: JsValue(NoModificationAllowedError: CSSStyleDeclaration.removeProperty: Can't remove property 'max-width' from computed style
-
-    let min_size = if min_width > 0. || min_height > 0. || cfg!(target_arch = "wasm32") {
+    let min_size = if min_width > 0. || min_height > 0. {
         Some(crate::api::LogicalSize::new(min_width, min_height))
     } else {
         None
     };
 
-    let max_size = if (max_width > 0.
+    let max_size = if max_width > 0.
         && max_height > 0.
-        && (max_width < i32::MAX as f32 || max_height < i32::MAX as f32))
-        || cfg!(target_arch = "wasm32")
+        && (max_width < i32::MAX as f32 || max_height < i32::MAX as f32)
     {
         // maximum widget size for Qt and a workaround for the winit api not allowing partial constraints
         let window_size_max = 16_777_215.;
@@ -696,7 +692,6 @@ pub fn organize_dialog_button_layout(
     let mut organized_data = GridLayoutOrganizedData::default();
     organized_data.reserve(input_data.len() * 4);
 
-    #[cfg(feature = "std")]
     fn is_kde() -> bool {
         // assume some Unix, check if XDG_CURRENT_DESKTOP starts with K
         std::env::var("XDG_CURRENT_DESKTOP")
@@ -704,8 +699,6 @@ pub fn organize_dialog_button_layout(
             .and_then(|v| v.as_bytes().first().copied())
             .is_some_and(|x| x.eq_ignore_ascii_case(&b'K'))
     }
-    #[cfg(not(feature = "std"))]
-    let is_kde = || true;
 
     let expected_order: &[DialogButtonRole] = match crate::detect_operating_system() {
         crate::items::OperatingSystemType::Windows => {
@@ -2091,11 +2084,7 @@ pub fn solve_flexbox_layout_with_measure(
     );
     if is_column && data.flex_wrap == FlexboxLayoutWrap::Wrap && data.width > 0 as Coord {
         // taffy computes in `f32`, so ignore an overflow below half a pixel.
-        // Integer coordinates are exact and need no tolerance.
-        #[cfg(not(slint_int_coord))]
         const OVERFLOW_TOLERANCE: Coord = 0.5;
-        #[cfg(slint_int_coord)]
-        const OVERFLOW_TOLERANCE: Coord = 0;
         let (left, right) = (data.padding_h.begin, data.width - data.padding_h.end);
         // Taffy indices, not original cell ones: `order` may have sorted them.
         // Asking whether *any* child overflows does not care about the order.

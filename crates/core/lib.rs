@@ -10,23 +10,11 @@
 #![allow(clippy::missing_safety_doc)] // FFI surface has many exported unsafe entry points
 #![cfg_attr(slint_nightly_test, feature(non_exhaustive_omitted_patterns_lint))]
 #![cfg_attr(slint_nightly_test, warn(non_exhaustive_omitted_patterns))]
-#![no_std]
 #![debugger_visualizer(gdb_script_file = "gdb_pretty_printers.py")]
 
 extern crate alloc;
-#[cfg(feature = "std")]
-extern crate std;
 
-#[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-pub mod unsafe_single_threaded;
-#[cfg(all(not(feature = "std"), not(feature = "unsafe-single-threaded")))]
-compile_error!(
-    "At least one of the following feature need to be enabled: `std` or `unsafe-single-threaded`"
-);
 pub use crate::items::OperatingSystemType;
-#[cfg(all(not(feature = "std"), feature = "unsafe-single-threaded"))]
-pub use crate::unsafe_single_threaded::thread_local;
-#[cfg(feature = "std")]
 pub use std::thread_local;
 
 pub mod accessibility;
@@ -96,7 +84,6 @@ pub use graphics::Brush;
 #[doc(inline)]
 pub use graphics::RgbaColor;
 
-#[cfg(feature = "std")]
 #[doc(inline)]
 pub use graphics::PathData;
 
@@ -110,100 +97,25 @@ pub use context::{
     MotionPreference, SlintContext, SlintContextWeak, with_existing_context, with_global_context,
 };
 
-#[cfg(not(slint_int_coord))]
 pub type Coord = f32;
-#[cfg(slint_int_coord)]
-pub type Coord = i32;
 
 /// This type is not exported from the public API crate, so function having this
 /// parameter cannot be called from the public API without naming it
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InternalToken;
 
-#[cfg(feature = "std")]
 thread_local!(
     /// Permit testing code to force an OS type
     pub static OPERATING_SYSTEM_OVERRIDE: core::cell::Cell<Option<OperatingSystemType>> =
         Default::default();
 );
 
-#[cfg(not(target_family = "wasm"))]
-pub fn detect_operating_system() -> OperatingSystemType {
-    #[cfg(feature = "std")]
-    if let Some(os_override) = OPERATING_SYSTEM_OVERRIDE.with(|os_override| os_override.get()) {
-        return os_override;
-    }
-
-    if cfg!(target_os = "android") {
-        OperatingSystemType::Android
-    } else if cfg!(target_os = "ios") {
-        OperatingSystemType::Ios
-    } else if cfg!(target_os = "macos") {
-        OperatingSystemType::Macos
-    } else if cfg!(target_os = "windows") {
-        OperatingSystemType::Windows
-    } else if cfg!(target_os = "linux") {
-        OperatingSystemType::Linux
-    } else {
-        OperatingSystemType::Other
-    }
-}
-
-#[cfg(target_family = "wasm")]
 pub fn detect_operating_system() -> OperatingSystemType {
     if let Some(os_override) = OPERATING_SYSTEM_OVERRIDE.with(|os_override| os_override.get()) {
         return os_override;
     }
 
-    #[cfg(not(target_os = "emscripten"))]
-    fn navigator_user_agent_and_platform() -> (std::string::String, std::string::String) {
-        let navigator = web_sys::window().map(|w| w.navigator());
-        let user_agent = navigator.as_ref().and_then(|n| n.user_agent().ok()).unwrap_or_default();
-        let platform = navigator.as_ref().and_then(|n| n.platform().ok()).unwrap_or_default();
-        (user_agent, platform)
-    }
-
-    #[cfg(target_os = "emscripten")]
-    #[allow(unsafe_code)]
-    fn navigator_user_agent_and_platform() -> (std::string::String, std::string::String) {
-        unsafe extern "C" {
-            fn emscripten_run_script_string(
-                script: *const core::ffi::c_char,
-            ) -> *const core::ffi::c_char;
-        }
-        let run = |script: &core::ffi::CStr| {
-            // The result points to a buffer that the next call overwrites, so copy it right away.
-            let result = unsafe { emscripten_run_script_string(script.as_ptr()) };
-            if result.is_null() {
-                return std::string::String::new();
-            }
-            unsafe { core::ffi::CStr::from_ptr(result) }.to_string_lossy().into_owned()
-        };
-        (run(c"navigator.userAgent"), run(c"navigator.platform"))
-    }
-
-    // Querying the navigator involves a round-trip to JavaScript and some string processing, so
-    // cache the result: it cannot change for the lifetime of the page.
-    static DETECTED: std::sync::LazyLock<OperatingSystemType> = std::sync::LazyLock::new(|| {
-        let (mut user_agent, mut platform) = navigator_user_agent_and_platform();
-        user_agent.make_ascii_lowercase();
-        platform.make_ascii_lowercase();
-
-        if user_agent.contains("ipad") || user_agent.contains("iphone") {
-            OperatingSystemType::Ios
-        } else if user_agent.contains("android") {
-            OperatingSystemType::Android
-        } else if platform.starts_with("mac") {
-            OperatingSystemType::Macos
-        } else if platform.starts_with("win") {
-            OperatingSystemType::Windows
-        } else if platform.starts_with("linux") {
-            OperatingSystemType::Linux
-        } else {
-            OperatingSystemType::Other
-        }
-    });
-    *DETECTED
+    OperatingSystemType::Windows
 }
 
 /// Returns true if the current platform is an Apple platform (macOS, iOS, iPadOS)
@@ -215,13 +127,4 @@ pub fn open_url(url: &str, ctx: &SlintContext) -> Result<(), crate::api::Platfor
     ctx.platform().open_url(url)
 }
 
-#[cfg(target_os = "macos")]
-pub fn macos_bring_all_windows_to_front() {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSApplication;
-    let Some(mtm) = MainThreadMarker::new() else { return };
-    NSApplication::sharedApplication(mtm).arrangeInFront(None);
-}
-
-#[cfg(not(target_os = "macos"))]
 pub fn macos_bring_all_windows_to_front() {}

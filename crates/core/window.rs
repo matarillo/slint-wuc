@@ -293,7 +293,7 @@ pub trait WindowAdapterInternal: core::any::Any {
     }
 
     /// Re-implement this to support exposing raw window handles (version 0.6).
-    #[cfg(all(feature = "std", feature = "raw-window-handle-06"))]
+    #[cfg(feature = "raw-window-handle-06")]
     fn window_handle_06_rc(
         &self,
     ) -> Result<
@@ -304,7 +304,7 @@ pub trait WindowAdapterInternal: core::any::Any {
     }
 
     /// Re-implement this to support exposing raw display handles (version 0.6).
-    #[cfg(all(feature = "std", feature = "raw-window-handle-06"))]
+    #[cfg(feature = "raw-window-handle-06")]
     fn display_handle_06_rc(
         &self,
     ) -> Result<
@@ -612,7 +612,6 @@ pub(crate) struct MouseDispatchResult {
 
 /// The program a path names, without its directory or the Windows `.exe` suffix.
 /// `None` for a path that names no file, or an empty name.
-#[cfg(feature = "std")]
 fn program_name(path: &std::path::Path) -> Option<SharedString> {
     // A Windows program is called "foo", not "foo.exe"
     let is_exe = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
@@ -627,7 +626,6 @@ fn program_name(path: &std::path::Path) -> Option<SharedString> {
 /// two agree even when the program is started through a symlink.
 /// Empty where the platform names the program neither way, such as on the web.
 pub fn application_name() -> SharedString {
-    #[cfg(feature = "std")]
     {
         static NAME: std::sync::LazyLock<SharedString> = std::sync::LazyLock::new(|| {
             std::env::args_os()
@@ -638,8 +636,6 @@ pub fn application_name() -> SharedString {
         });
         NAME.clone()
     }
-    #[cfg(not(feature = "std"))]
-    SharedString::default()
 }
 
 crate::thread_local! {
@@ -2823,11 +2819,9 @@ pub mod ffi {
     #![allow(missing_docs)]
 
     use super::*;
-    #[cfg(feature = "std")]
     use crate::SharedVector;
     use crate::api::{RenderingNotifier, RenderingState, SetRenderingNotifierError};
     use crate::graphics::IntSize;
-    #[cfg(feature = "std")]
     use crate::graphics::Rgba8Pixel;
     use crate::graphics::Size;
     use crate::items::WindowItem;
@@ -3154,10 +3148,6 @@ pub mod ffi {
                     let cpp_graphics_api = match graphics_api {
                         crate::api::GraphicsAPI::NativeOpenGL { .. } => GraphicsAPI::OpenGL,
                         crate::api::GraphicsAPI::WebGL { .. } => unreachable!(), // We don't support wasm with C++
-                        #[cfg(feature = "unstable-wgpu-29")]
-                        crate::api::GraphicsAPI::WGPU29 { .. } => GraphicsAPI::Inaccessible, // There is no C++ API for wgpu (maybe wgpu c in the future?)
-                        #[cfg(feature = "unstable-wgpu-30")]
-                        crate::api::GraphicsAPI::WGPU30 { .. } => GraphicsAPI::Inaccessible, // There is no C++ API for wgpu (maybe wgpu c in the future?)
                     };
                     (self.callback)(state, cpp_graphics_api, self.user_data)
                 }
@@ -3453,7 +3443,6 @@ pub mod ffi {
     }
 
     /// Takes a snapshot of the window contents and returns it as RGBA8 encoded pixel buffer.
-    #[cfg(feature = "std")]
     #[unsafe(no_mangle)]
     pub unsafe extern "C" fn slint_windowrc_take_snapshot(
         handle: *const WindowAdapterRcOpaque,
@@ -3595,7 +3584,7 @@ pub mod ffi_window {
     }
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

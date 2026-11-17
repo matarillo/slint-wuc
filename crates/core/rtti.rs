@@ -19,11 +19,7 @@ use core::convert::{TryFrom, TryInto};
 use core::ffi::c_void;
 use core::pin::Pin;
 
-// There is no `Path` item without the `path` feature, and `()` is in the list anyway.
-cfg_select! {
-    feature = "path" => { use crate::graphics::PathData; }
-    _ => { type PathData = (); }
-}
+use crate::graphics::PathData;
 
 // List here the type of every member of a builtin item.
 macro_rules! declare_ValueType {

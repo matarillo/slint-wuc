@@ -14,8 +14,6 @@
 use crate::animations::Instant;
 use crate::animations::simulations::{Direction, Parameter, PositionSimulation, Simulation};
 use core::time::Duration;
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
 
 mod spline;
 

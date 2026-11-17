@@ -1264,7 +1264,6 @@ impl Item for TextInput {
                     self.as_ref().anchor_position_byte_offset.set(clicked_offset);
                 }
 
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 self.ensure_focus_and_ime(window_adapter, self_rc);
 
                 match click_count % 3 {
@@ -1284,14 +1283,11 @@ impl Item for TextInput {
                 return InputEventResult::GrabMouse;
             }
             MouseEvent::Pressed { button: PointerEventButton::Middle, .. } => {
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 self.ensure_focus_and_ime(window_adapter, self_rc);
             }
             MouseEvent::Released { button: PointerEventButton::Left, .. } => {
                 self.as_ref().pressed.set(0);
                 self.copy_clipboard(window_adapter, Clipboard::SelectionClipboard);
-                #[cfg(any(target_os = "android", target_os = "ios"))]
-                self.ensure_focus_and_ime(window_adapter, self_rc);
             }
             MouseEvent::Released { position, button: PointerEventButton::Middle, .. } => {
                 if self.read_only() {
@@ -1318,12 +1314,6 @@ impl Item for TextInput {
                 if pressed > 0 {
                     let (clicked_offset, clicked_affinity) =
                         self.byte_offset_for_position(*position, window_adapter, self_rc);
-                    // Like Android's native text fields, dragging a finger after a single tap moves
-                    // the cursor instead of selecting.
-                    #[cfg(target_os = "android")]
-                    if pressed == 1 && event.is_from_touch() {
-                        self.as_ref().anchor_position_byte_offset.set(clicked_offset as i32);
-                    }
                     self.set_cursor_position_with_affinity(
                         clicked_offset as i32,
                         clicked_affinity,
@@ -1600,8 +1590,7 @@ impl Item for TextInput {
                         ));
                     }
 
-                    if cfg!(not(target_vendor = "apple")) && *_reason == FocusReason::TabNavigation
-                    {
+                    if *_reason == FocusReason::TabNavigation {
                         self.select_all(window_adapter, self_rc);
                     }
                 }
@@ -1616,27 +1605,6 @@ impl Item for TextInput {
                 }
                 WindowInner::from_pub(window_adapter.window()).set_text_input_focused(false);
                 if !self.read_only() {
-                    // commit the preedit text on android
-                    #[cfg(target_os = "android")]
-                    {
-                        let preedit_text = self.preedit_text();
-                        if !preedit_text.is_empty() {
-                            let mut text = String::from(self.text());
-                            let cursor_position = self.cursor_position(&text);
-                            text.insert_str(cursor_position, &preedit_text);
-                            self.set_text_internal(text.into());
-                            let new_pos = (cursor_position + preedit_text.len()) as i32;
-                            self.anchor_position_byte_offset.set(new_pos);
-                            self.set_cursor_position(
-                                new_pos,
-                                false,
-                                TextChangeNotify::TriggerCallbacks,
-                                window_adapter,
-                                self_rc,
-                            );
-                            Self::FIELD_OFFSETS.edited().apply_pin(self).call(&());
-                        }
-                    }
                     self.preedit_text.set(Default::default());
                 }
             }
@@ -1741,10 +1709,7 @@ impl core::convert::TryFrom<char> for TextCursorDirection {
             key_codes::DownArrow => Self::NextLine,
             key_codes::PageUp => Self::PageUp,
             key_codes::PageDown => Self::PageDown,
-            // On macOS and iOS this scrolls to the top or the bottom of the page
-            #[cfg(not(target_vendor = "apple"))]
             key_codes::Home => Self::StartOfLine,
-            #[cfg(not(target_vendor = "apple"))]
             key_codes::End => Self::EndOfLine,
             _ => return Err(()),
         })

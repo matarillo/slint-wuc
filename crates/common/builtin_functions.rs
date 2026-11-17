@@ -185,7 +185,7 @@ macro_rules! for_each_builtin_function {
             AccentColor: pure fn accent_color(&context) -> Color { context.accent_color() }
             /// Not callable from `.slint`: `lower_animation` ANDs it into each animation's `enabled` field.
             ReducedMotion: pure fn reduced_motion(&context) -> bool {
-                cfg!(feature = "std") && context.motion_preference() == crate::MotionPreference::Reduced
+                context.motion_preference() == crate::MotionPreference::Reduced
             }
             SupportsNativeMenuBar: pure fn() -> bool
             /// Setup the menu bar
@@ -255,11 +255,11 @@ macro_rules! for_each_builtin_function {
             /// The window title when the application doesn't set one, see
             /// `i_slint_core::window::default_window_title`
             DefaultWindowTitle: pure fn default_window_title() -> SharedString { crate::window::default_window_title() }
-            PathPointAt: #[cfg(feature = "path")] pure fn path_point_at(path: ItemArg<Path> => ElementReference, t: f32) -> LogicalPosition {
+            PathPointAt: pure fn path_point_at(path: ItemArg<Path> => ElementReference, t: f32) -> LogicalPosition {
                 let point = path.item.point_at(&path.rc, t);
                 crate::api::LogicalPosition::new(point.x, point.y)
             }
-            PathAngleAt: #[cfg(feature = "path")] pure fn path_angle_at(path: ItemArg<Path> => ElementReference, t: f32) -> f32 => Angle {
+            PathAngleAt: pure fn path_angle_at(path: ItemArg<Path> => ElementReference, t: f32) -> f32 => Angle {
                 path.item.angle_at(&path.rc, t)
             }
         }

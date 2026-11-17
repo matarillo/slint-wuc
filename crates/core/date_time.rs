@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 use crate::SharedString;
-#[cfg(feature = "std")]
 use chrono::Local;
 use chrono::{Datelike, NaiveDate};
 
@@ -61,16 +60,9 @@ pub fn parse_date(date: &str, format: &str) -> Option<[i32; 3]> {
         .map(|date| [date.day() as i32, date.month() as i32, date.year()])
 }
 
-#[cfg(feature = "std")]
 pub fn date_now() -> [i32; 3] {
     let now = Local::now().date_naive();
     [now.day() as i32, now.month() as i32, now.year()]
-}
-
-// display the today date is currently not implemented for no_std
-#[cfg(not(feature = "std"))]
-pub fn date_now() -> [i32; 3] {
-    [-1, -1, -1]
 }
 
 #[cfg(feature = "ffi")]

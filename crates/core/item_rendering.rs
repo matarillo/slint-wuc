@@ -17,12 +17,9 @@ use crate::lengths::{
 pub use crate::partial_renderer::CachedRenderingData;
 use crate::window::WindowAdapterRc;
 use crate::{Brush, SharedString};
-#[cfg(feature = "std")]
 use alloc::boxed::Box;
-#[cfg(feature = "std")]
 use core::cell::RefCell;
 use core::pin::Pin;
-#[cfg(feature = "std")]
 use std::collections::HashMap;
 use vtable::VRc;
 
@@ -34,7 +31,6 @@ use vtable::VRc;
 /// cache is automatically invalided when the property gets dirty.
 /// [`ItemCache::component_destroyed`] must be called to clear the cache for that
 /// component.
-#[cfg(feature = "std")]
 pub struct ItemCache<T> {
     /// The pointer is a pointer to a component
     map: RefCell<HashMap<*const vtable::Dyn, HashMap<u32, crate::graphics::CachedGraphicsData<T>>>>,
@@ -42,14 +38,12 @@ pub struct ItemCache<T> {
     window_scale_factor_tracker: Pin<Box<crate::properties::PropertyTracker>>,
 }
 
-#[cfg(feature = "std")]
 impl<T> Default for ItemCache<T> {
     fn default() -> Self {
         Self { map: Default::default(), window_scale_factor_tracker: Box::pin(Default::default()) }
     }
 }
 
-#[cfg(feature = "std")]
 impl<T: Clone> ItemCache<T> {
     /// Like [`Self::get_or_update_cache_entry`], but drops a value for which `is_stale` returns
     /// `true` and computes it again: for values whose validity depends on state the dependency
@@ -107,7 +101,6 @@ impl<T: Clone> ItemCache<T> {
     }
 }
 
-#[cfg(feature = "std")]
 impl<T> ItemCache<T> {
     /// Returns the cached value associated with the `item_rc` if it is in the cache
     /// and still valid.
@@ -738,7 +731,6 @@ pub trait ItemRenderer {
         _self_rc: &ItemRc,
         _size: LogicalSize,
     );
-    #[cfg(feature = "path")]
     fn draw_path(&mut self, path: Pin<&Path>, _self_rc: &ItemRc, _size: LogicalSize);
     fn draw_box_shadow(
         &mut self,
@@ -875,7 +867,6 @@ pub trait ItemRenderer {
 ///
 /// The `'cache` lifetime lets `layer_cache` hand out a reference that doesn't
 /// borrow `self`, so the orchestrator can call the other `&mut self` methods.
-#[cfg(feature = "std")]
 pub trait LayerRenderer<'cache>: ItemRenderer {
     /// Per-layer render target (for example a skia `Surface` or a reused GPU texture).
     type LayerTarget;
@@ -907,7 +898,6 @@ pub trait LayerRenderer<'cache>: ItemRenderer {
 }
 
 /// Render the children of a [`Layer`] item through the given [`LayerRenderer`] backend.
-#[cfg(feature = "std")]
 pub fn render_layer<'cache, R>(
     renderer: &mut R,
     item_rc: &ItemRc,

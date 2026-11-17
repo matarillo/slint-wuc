@@ -35,9 +35,7 @@ pub use color::*;
 
 #[cfg(feature = "shared-fontique")]
 use i_slint_common::sharedfontique::{self, fontique};
-#[cfg(feature = "path")]
 mod path;
-#[cfg(feature = "path")]
 pub use path::*;
 
 mod brush;
@@ -58,11 +56,6 @@ pub mod boxshadowcache;
 
 pub mod border_radius;
 pub use border_radius::*;
-
-#[cfg(feature = "wgpu-29")]
-pub mod wgpu_29;
-#[cfg(feature = "wgpu-30")]
-pub mod wgpu_30;
 
 /// Adjusts a rectangle and a border width for drawing the border entirely inside the
 /// rectangle's geometry: renderers stroke a border centered on the path, so the rectangle
@@ -190,12 +183,6 @@ pub enum RequestedGraphicsAPI {
     Vulkan,
     /// Direct 3D
     Direct3D,
-    #[cfg(feature = "unstable-wgpu-29")]
-    /// WGPU 29.x
-    WGPU29(wgpu_29::api::WGPUConfiguration),
-    #[cfg(feature = "unstable-wgpu-30")]
-    /// WGPU 30.x
-    WGPU30(wgpu_30::api::WGPUConfiguration),
 }
 
 impl TryFrom<&RequestedGraphicsAPI> for RequestedOpenGLVersion {
@@ -215,14 +202,6 @@ impl TryFrom<&RequestedGraphicsAPI> for RequestedOpenGLVersion {
             RequestedGraphicsAPI::Direct3D => {
                 Err("Direct3D rendering is not supported with an OpenGL renderer".into())
             }
-            #[cfg(feature = "unstable-wgpu-29")]
-            RequestedGraphicsAPI::WGPU29(..) => {
-                Err("WGPU 29.x rendering is not supported with an OpenGL renderer".into())
-            }
-            #[cfg(feature = "unstable-wgpu-30")]
-            RequestedGraphicsAPI::WGPU30(..) => {
-                Err("WGPU 30.x rendering is not supported with an OpenGL renderer".into())
-            }
         }
     }
 }
@@ -231,28 +210,6 @@ impl From<RequestedOpenGLVersion> for RequestedGraphicsAPI {
     fn from(version: RequestedOpenGLVersion) -> Self {
         Self::OpenGL(version)
     }
-}
-
-/// Private API exposed to just the renderers to create GraphicsAPI instance with
-/// non-exhaustive enum variant.
-#[cfg(feature = "unstable-wgpu-29")]
-pub fn create_graphics_api_wgpu_29(
-    instance: wgpu_29::wgpu::Instance,
-    device: wgpu_29::wgpu::Device,
-    queue: wgpu_29::wgpu::Queue,
-) -> crate::api::GraphicsAPI<'static> {
-    crate::api::GraphicsAPI::WGPU29 { instance, device, queue }
-}
-
-/// Private API exposed to just the renderers to create GraphicsAPI instance with
-/// non-exhaustive enum variant.
-#[cfg(feature = "unstable-wgpu-30")]
-pub fn create_graphics_api_wgpu_30(
-    instance: wgpu_30::wgpu::Instance,
-    device: wgpu_30::wgpu::Device,
-    queue: wgpu_30::wgpu::Queue,
-) -> crate::api::GraphicsAPI<'static> {
-    crate::api::GraphicsAPI::WGPU30 { instance, device, queue }
 }
 
 /// Internal module for use by cbindgen and the C++ platform API layer.
@@ -297,7 +254,6 @@ pub mod ffi {
         _unit: std::marker::PhantomData<U>,
     }
 
-    #[cfg(feature = "std")]
     pub use super::path::ffi::*;
 
     /// Conversion function used by C++ platform API layer to

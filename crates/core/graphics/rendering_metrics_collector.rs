@@ -72,10 +72,7 @@ impl RenderingMetricsCollector {
     /// If enabled, this will also print out some system information such as whether
     /// this is a debug or release build, as well as the provided winsys_info string.
     pub fn new(winsys_info: &str) -> Option<Rc<Self>> {
-        #[cfg(feature = "std")]
         let options = std::env::var("SLINT_DEBUG_PERFORMANCE").ok()?;
-        #[cfg(not(feature = "std"))]
-        let options = option_env!("SLINT_DEBUG_PERFORMANCE")?;
         let mut output_console = false;
         let mut output_overlay = false;
         let mut refresh_mode = None;

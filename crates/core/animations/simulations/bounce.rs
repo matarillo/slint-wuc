@@ -19,8 +19,6 @@ use core::time::Duration;
 use crate::animations::Instant;
 use crate::animations::simulations::spring::SpringRegime;
 use crate::animations::simulations::{Direction, Parameter, PositionSimulation, Simulation};
-#[cfg(not(feature = "std"))]
-use num_traits::Float;
 
 #[cfg(test)]
 use crate::animations::simulations::test_limit_property;

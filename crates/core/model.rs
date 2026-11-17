@@ -194,7 +194,6 @@ pub trait Model {
     /// If the model can update the data, it should also call [`ModelNotify::row_changed`] on its
     /// internal [`ModelNotify`].
     fn set_row_data(&self, _row: usize, _data: Self::Data) {
-        #[cfg(feature = "std")]
         crate::debug_log!(
             "Model::set_row_data called on a model of type {} which does not re-implement this method. \
             This happens when trying to modify a read-only model",

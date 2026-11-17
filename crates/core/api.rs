@@ -14,7 +14,6 @@ use alloc::boxed::Box;
 use alloc::string::String;
 
 pub use crate::data_transfer::DataTransfer;
-#[cfg(target_has_atomic = "ptr")]
 pub use crate::future::*;
 pub use crate::graphics::{
     Brush, Color, Gray8Pixel, Image, LoadImageError, OklchColor, Rgb8Pixel, Rgb565Pixel,
@@ -258,7 +257,6 @@ fn logical_physical_size() {
     assert_eq!(logical.to_physical(2.), phys);
 }
 
-#[i_slint_core_macros::slint_doc]
 /// This enum describes a low-level access to specific graphics APIs used
 /// by the renderer.
 #[derive(Clone)]
@@ -277,40 +275,6 @@ pub enum GraphicsAPI<'a> {
         /// `getContext` function on the HTML Canvas element.
         context_type: &'a str,
     },
-    /// The rendering is based on WGPU 29.x. Use the provided fields to submit commits to the provided
-    /// WGPU command queue.
-    ///
-    /// *Note*: This function is behind the [`unstable-wgpu-29` feature flag](slint:rust:slint/docs/cargo_features/#backends)
-    ///         and may be removed or changed in future minor releases, as new major WGPU releases become available.
-    ///
-    /// See also the [`slint::wgpu_29`](slint:rust:slint/wgpu_29) module.
-    #[cfg(feature = "unstable-wgpu-29")]
-    #[non_exhaustive]
-    WGPU29 {
-        /// The WGPU instance used for rendering.
-        instance: wgpu_29::Instance,
-        /// The WGPU device used for rendering.
-        device: wgpu_29::Device,
-        /// The WGPU queue for used for command submission.
-        queue: wgpu_29::Queue,
-    },
-    /// The rendering is based on WGPU 30.x. Use the provided fields to submit commits to the provided
-    /// WGPU command queue.
-    ///
-    /// *Note*: This function is behind the [`unstable-wgpu-30` feature flag](slint:rust:slint/docs/cargo_features/#backends)
-    ///         and may be removed or changed in future minor releases, as new major WGPU releases become available.
-    ///
-    /// See also the [`slint::wgpu_30`](slint:rust:slint/wgpu_30) module.
-    #[cfg(feature = "unstable-wgpu-30")]
-    #[non_exhaustive]
-    WGPU30 {
-        /// The WGPU instance used for rendering.
-        instance: wgpu_30::Instance,
-        /// The WGPU device used for rendering.
-        device: wgpu_30::Device,
-        /// The WGPU queue for used for command submission.
-        queue: wgpu_30::Queue,
-    },
 }
 
 impl core::fmt::Debug for GraphicsAPI<'_> {
@@ -320,10 +284,6 @@ impl core::fmt::Debug for GraphicsAPI<'_> {
             GraphicsAPI::WebGL { context_type, .. } => {
                 write!(f, "GraphicsAPI::WebGL(context_type = {context_type})")
             }
-            #[cfg(feature = "unstable-wgpu-29")]
-            GraphicsAPI::WGPU29 { .. } => write!(f, "GraphicsAPI::WGPU29"),
-            #[cfg(feature = "unstable-wgpu-30")]
-            GraphicsAPI::WGPU30 { .. } => write!(f, "GraphicsAPI::WGPU30"),
         }
     }
 }
@@ -391,14 +351,12 @@ impl core::fmt::Display for SetRenderingNotifierError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for SetRenderingNotifierError {}
 
 #[cfg(feature = "raw-window-handle-06")]
 #[derive(Clone)]
 enum WindowHandleInner {
     HandleByAdapter(alloc::rc::Rc<dyn WindowAdapter>),
-    #[cfg(feature = "std")]
     HandleByRcRWH {
         window_handle_provider: std::sync::Arc<dyn raw_window_handle_06::HasWindowHandle>,
         display_handle_provider: std::sync::Arc<dyn raw_window_handle_06::HasDisplayHandle>,
@@ -422,7 +380,6 @@ impl raw_window_handle_06::HasWindowHandle for WindowHandle {
     ) -> Result<raw_window_handle_06::WindowHandle<'_>, raw_window_handle_06::HandleError> {
         match &self.inner {
             WindowHandleInner::HandleByAdapter(adapter) => adapter.window_handle_06(),
-            #[cfg(feature = "std")]
             WindowHandleInner::HandleByRcRWH { window_handle_provider, .. } => {
                 window_handle_provider.window_handle()
             }
@@ -437,7 +394,6 @@ impl raw_window_handle_06::HasDisplayHandle for WindowHandle {
     ) -> Result<raw_window_handle_06::DisplayHandle<'_>, raw_window_handle_06::HandleError> {
         match &self.inner {
             WindowHandleInner::HandleByAdapter(adapter) => adapter.display_handle_06(),
-            #[cfg(feature = "std")]
             WindowHandleInner::HandleByRcRWH { display_handle_provider, .. } => {
                 display_handle_provider.display_handle()
             }
@@ -824,7 +780,6 @@ impl Window {
     #[cfg(feature = "raw-window-handle-06")]
     pub fn window_handle(&self) -> WindowHandle {
         let adapter = self.0.window_adapter();
-        #[cfg(feature = "std")]
         if let Some((window_handle_provider, display_handle_provider)) =
             adapter.internal(crate::InternalToken).and_then(|internal| {
                 internal.window_handle_06_rc().ok().zip(internal.display_handle_06_rc().ok())
@@ -844,9 +799,6 @@ impl Window {
     /// Takes a snapshot of the window contents and returns it as RGBA8 encoded pixel buffer.
     ///
     /// Note that this function may be slow to call as it may need to re-render the scene.
-    ///
-    /// Only available with the `std` feature.
-    #[cfg(feature = "std")]
     pub fn take_snapshot(&self) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
         self.0.window_adapter().renderer().take_snapshot()
     }
@@ -1145,7 +1097,6 @@ mod weak_handle {
     /// This is useful to use with [`invoke_from_event_loop()`] or [`Self::upgrade_in_event_loop()`].
     pub struct Weak<T: StrongHandle> {
         inner: T::WeakInner,
-        #[cfg(feature = "std")]
         thread: std::thread::ThreadId,
     }
 
@@ -1153,7 +1104,6 @@ mod weak_handle {
         fn default() -> Self {
             Self {
                 inner: T::WeakInner::default(),
-                #[cfg(feature = "std")]
                 thread: std::thread::current().id(),
             }
         }
@@ -1163,7 +1113,6 @@ mod weak_handle {
         fn clone(&self) -> Self {
             Self {
                 inner: self.inner.clone(),
-                #[cfg(feature = "std")]
                 thread: self.thread,
             }
         }
@@ -1174,7 +1123,6 @@ mod weak_handle {
         pub fn new(inner: T::WeakInner) -> Self {
             Self {
                 inner,
-                #[cfg(feature = "std")]
                 thread: std::thread::current().id(),
             }
         }
@@ -1185,7 +1133,6 @@ mod weak_handle {
         /// This also returns None if the current thread is not the thread that created
         /// the component
         pub fn upgrade(&self) -> Option<T> {
-            #[cfg(feature = "std")]
             if std::thread::current().id() != self.thread {
                 return None;
             }
@@ -1198,7 +1145,6 @@ mod weak_handle {
         /// Otherwise, this function panics.
         #[track_caller]
         pub fn unwrap(&self) -> T {
-            #[cfg(feature = "std")]
             if std::thread::current().id() != self.thread {
                 panic!(
                     "Trying to upgrade a Weak from a different thread than the one it belongs to"
@@ -1239,7 +1185,6 @@ mod weak_handle {
         /// # thread.join().unwrap(); return; // don't run the event loop in examples
         /// handle.run().unwrap();
         /// ```
-        #[cfg(any(feature = "std", feature = "unsafe-single-threaded"))]
         pub fn upgrade_in_event_loop(
             &self,
             func: impl FnOnce(T) + Send + 'static,
@@ -1259,10 +1204,8 @@ mod weak_handle {
     // Safety: we make sure in upgrade that the thread is the proper one,
     // and the VWeak only use atomic pointer so it is safe to clone and drop in another thread
     #[allow(unsafe_code)]
-    #[cfg(any(feature = "std", feature = "unsafe-single-threaded"))]
     unsafe impl<T: StrongHandle> Send for Weak<T> {}
     #[allow(unsafe_code)]
-    #[cfg(any(feature = "std", feature = "unsafe-single-threaded"))]
     unsafe impl<T: StrongHandle> Sync for Weak<T> {}
 }
 
@@ -1346,7 +1289,6 @@ impl core::fmt::Display for EventLoopError {
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for EventLoopError {}
 
 /// The platform encountered a fatal error.
@@ -1384,13 +1326,6 @@ pub enum PlatformError {
 
     /// Another platform-specific error occurred.
     OtherError(Box<dyn core::error::Error + Send + Sync>),
-}
-
-#[cfg(all(target_arch = "wasm32", not(target_os = "emscripten")))]
-impl From<PlatformError> for wasm_bindgen::JsValue {
-    fn from(err: PlatformError) -> wasm_bindgen::JsValue {
-        wasm_bindgen::JsError::from(err).into()
-    }
 }
 
 impl core::fmt::Debug for PlatformError {
@@ -1431,14 +1366,12 @@ impl From<&str> for PlatformError {
     }
 }
 
-#[cfg(feature = "std")]
 impl From<Box<dyn std::error::Error + Send + Sync>> for PlatformError {
     fn from(error: Box<dyn std::error::Error + Send + Sync>) -> Self {
         Self::OtherError(error)
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for PlatformError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -1449,7 +1382,6 @@ impl std::error::Error for PlatformError {
 }
 
 #[test]
-#[cfg(feature = "std")]
 fn error_is_send() {
     let _: Box<dyn std::error::Error + Send + Sync + 'static> = PlatformError::NoPlatform.into();
 }

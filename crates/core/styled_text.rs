@@ -12,13 +12,11 @@ pub struct StyledText {
 }
 
 /// Error returned when [`StyledText::from_markdown`] cannot parse the provided markdown input.
-#[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyledTextFromMarkdownError {
     message: alloc::string::String,
 }
 
-#[cfg(feature = "std")]
 impl StyledTextFromMarkdownError {
     fn new(errors: alloc::vec::Vec<i_slint_common::styled_text::StyledTextParseError>) -> Self {
         Self {
@@ -31,17 +29,14 @@ impl StyledTextFromMarkdownError {
     }
 }
 
-#[cfg(feature = "std")]
 impl core::fmt::Display for StyledTextFromMarkdownError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-#[cfg(feature = "std")]
 impl std::error::Error for StyledTextFromMarkdownError {}
 
-#[cfg(feature = "std")]
 impl StyledText {
     /// Creates styled text from plain text without applying markdown parsing.
     pub fn from_plain_text(text: &str) -> Self {
@@ -168,7 +163,6 @@ pub mod ffi {
     #![allow(unsafe_code)]
 
     use super::*;
-    #[cfg(feature = "std")]
     use alloc::string::String;
 
     #[unsafe(no_mangle)]
@@ -199,7 +193,6 @@ pub mod ffi {
         unsafe { core::ptr::write(out, ss.clone()) }
     }
 
-    #[cfg(feature = "std")]
     #[unsafe(no_mangle)]
     /// Create a styled text from plain text
     pub extern "C" fn slint_styled_text_from_plain_text(
@@ -209,7 +202,6 @@ pub mod ffi {
         *out = StyledText::from_plain_text(&String::from_utf8_lossy(text.as_slice()));
     }
 
-    #[cfg(feature = "std")]
     #[unsafe(no_mangle)]
     /// Parse markdown into styled text. Returns true on success.
     /// On failure, resets `out` to default.
@@ -228,7 +220,6 @@ pub mod ffi {
 }
 
 pub fn parse_markdown(_format_string: &str, _args: &[StyledText]) -> StyledText {
-    #[cfg(feature = "std")]
     {
         let paragraph_slices = _args
             .iter()
@@ -244,12 +235,9 @@ pub fn parse_markdown(_format_string: &str, _args: &[StyledText]) -> StyledText 
 
         StyledText { paragraphs: paragraphs.as_slice().into() }
     }
-    #[cfg(not(feature = "std"))]
-    Default::default()
 }
 
 pub fn color_to_styled_text(_color: crate::Color) -> StyledText {
-    #[cfg(feature = "std")]
     {
         let hex = alloc::format!(
             "#{:02x}{:02x}{:02x}{:02x}",
@@ -260,23 +248,18 @@ pub fn color_to_styled_text(_color: crate::Color) -> StyledText {
         );
         StyledText::from_plain_text(&hex)
     }
-    #[cfg(not(feature = "std"))]
-    Default::default()
 }
 
 pub fn string_to_styled_text(_string: alloc::string::String) -> StyledText {
-    #[cfg(feature = "std")]
     {
         if _string.is_empty() {
             return Default::default();
         }
         StyledText::from_plain_text(&_string)
     }
-    #[cfg(not(feature = "std"))]
-    Default::default()
 }
 
-#[cfg(all(test, feature = "std"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
