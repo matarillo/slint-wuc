@@ -16,14 +16,20 @@ Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is th
 - Positions are client pixels divided by the window's scale factor: logical coordinates.
 - Presses and releases carry `click_count: 0`; the core counts clicks with the platform's `click_interval`.
 - On a press, `SetCapture`; on the release of the last button, `ReleaseCapture`.
-  `WM_CAPTURECHANGED` while a button is down releases it.
+  `WM_CAPTURECHANGED` while a button is down (another window took the mouse) dispatches `Exit`:
+  the press ends without a release, so nothing counts it as a click.
 - The first move after entering arms `TrackMouseEvent(TME_LEAVE)`.
-  `WM_MOUSELEAVE` dispatches `BackendMouseEvent::Exit` unless a button is down, as winit does.
+  `WM_MOUSELEAVE` dispatches `BackendMouseEvent::Exit` unless a button is down, as winit does;
+  then the release of the last button dispatches it.
+- The window class has no `CS_DBLCLKS`, so a second click is a plain button down.
 - Wheel: `delta / WHEEL_DELTA` lines, 60 logical pixels per line, as winit converts line deltas.
   Use winit's Windows signs for both axes.
   A precision touchpad sends smaller deltas through the same messages, and that's fine.
 - Cursor: `WM_SETCURSOR` with `HTCLIENT` sets the cursor that `WindowAdapterInternal::set_mouse_cursor` last asked for,
   mapped to `IDC_*`; other hit-test codes go to `DefWindowProc`.
+  A change while the pointer is over the client area applies right away.
+  Image cursors show the arrow until Phase 5.
+- The code is `crates/core/host/input.rs`.
 
 ## Keyboard
 
@@ -48,6 +54,8 @@ Only `Clipboard::DefaultClipboard` exists on Windows.
 
 - `crates/testing` gets upstream's injection functions (`send_mouse_click`, `send_keyboard_char`, `send_keyboard_string_sequence`, and so on).
   They dispatch through `Window::dispatch_event`, as upstream's do, so upstream's `tests/cases/input` and `focus` run unchanged.
-- The Win32 translation is tested separately: a hidden HWND gets synthesized messages through `SendMessageW`,
-  and the test checks the events the window receives, for example through an `init` hook on a fixture item or a `TouchArea`'s properties.
+- The Win32 translation is tested separately in `tests/input`: a component from the upstream compiler gets a hidden HWND
+  (`Win32WindowAdapter::create_hwnd_for_testing`), synthesized messages go to it through `SendMessageW`,
+  and the test checks what reaches a `TouchArea` through the component's properties.
+  The platform belongs to the first thread that uses it, so one test runs all scenarios in turn.
   Keyboard tests that depend on the keyboard layout pin it with `LoadKeyboardLayoutW("00000409")` or skip with a reason.

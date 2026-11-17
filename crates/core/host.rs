@@ -41,6 +41,8 @@ use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, w};
 
+mod input;
+
 const WM_APP_INVOKE: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
 const WM_APP_SYNC: u32 = WM_APP + 3;
@@ -390,6 +392,7 @@ pub struct Win32WindowAdapter {
     title: RefCell<HSTRING>,
     sync_pending: Cell<bool>,
     visible: Cell<bool>,
+    mouse: input::Mouse,
 }
 
 impl Win32WindowAdapter {
@@ -422,6 +425,7 @@ impl Win32WindowAdapter {
             title: RefCell::new(HSTRING::new()),
             sync_pending: Cell::new(false),
             visible: Cell::new(false),
+            mouse: input::Mouse::new(),
         }))
     }
 
@@ -528,6 +532,18 @@ impl Win32WindowAdapter {
         Ok(hwnd)
     }
 
+    /// Creates the HWND without showing the window, so that tests can send it messages.
+    #[doc(hidden)]
+    pub fn create_hwnd_for_testing(&self) -> Result<HWND, PlatformError> {
+        self.ensure_hwnd()
+    }
+
+    /// A point in client pixels, in logical pixels.
+    fn logical_point(&self, point: POINT) -> crate::lengths::LogicalPoint {
+        let scale = self.window.scale_factor();
+        crate::lengths::LogicalPoint::new(point.x as f32 / scale, point.y as f32 / scale)
+    }
+
     /// The window's DPI, or the one its scale factor stands for while it has no HWND.
     fn dpi(&self) -> u32 {
         match self.hwnd.get() {
@@ -606,6 +622,8 @@ impl WindowAdapter for Win32WindowAdapter {
         self.visible.set(visible);
         if visible {
             self.sync();
+        } else {
+            self.mouse.reset();
         }
         Ok(())
     }
@@ -727,7 +745,19 @@ impl WindowAdapter for Win32WindowAdapter {
 }
 
 // `from_window` downcasts through it.
-impl WindowAdapterInternal for Win32WindowAdapter {}
+impl WindowAdapterInternal for Win32WindowAdapter {
+    fn set_mouse_cursor(
+        &self,
+        cursor: crate::cursor::MouseCursorInner,
+    ) -> crate::cursor::MouseCursorHandling {
+        match cursor {
+            crate::cursor::MouseCursorInner::BuiltIn(cursor) => self.mouse.set_cursor(cursor),
+            // Images come with Phase 5.
+            _ => self.mouse.set_cursor(crate::items::BuiltInMouseCursor::Default),
+        }
+        crate::cursor::MouseCursorHandling::Platform
+    }
+}
 
 impl Drop for Win32WindowAdapter {
     fn drop(&mut self) {
@@ -755,6 +785,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let Some(adapter) = weak.upgrade() else {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     };
+    if let Some(result) = input::handle(&adapter, hwnd, msg, wp, lp) {
+        return result;
+    }
     match msg {
         WM_APP_SYNC => {
             adapter.sync();

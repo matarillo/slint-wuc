@@ -2338,6 +2338,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-fork-input-tests"
+version = "0.0.0"
+dependencies = [
+ "i-slint-core",
+ "slint",
+ "slint-build",
+ "windows",
+]
+
+[[package]]
 name = "slint-fork-probe"
 version = "0.0.0"
 dependencies = [
