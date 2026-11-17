@@ -142,6 +142,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Sonnet] FocusScope、KeyBinding、Flickable、SwipeGestureHandler、ScaleRotateGestureHandler、WindowMoveArea、Timer の横展開。
 - [Sonnet] `testing`: イベント注入とモック時刻 (上流テストドライバー互換)、input / focus 系テストの移植。
 - **ゲート** [Opus]: 上流 `tests/cases` の input / focus 系が通る。
+- **状態**: 閉じた。input 30 件・focus 23 件が通り、残りは画像 (Phase 5)・テキスト入力 (Phase 4)・ポップアップとアクセシビリティ (Phase 6) を待つ (`tests/driver/exclusions.rs`)。マウス・タッチ・ペン・キーボード・クリップボード・ウィンドウ移動・Alt+F4 を `probe-input` で手動確認した。タッチパッドのピンチと回転は、上流の winit が Windows で送らないため対象外。2 本指のタッチによるジェスチャーは上流のコアがタッチイベントから作る。上流 `tests/cases/elements` の入力系 (Flickable、ジェスチャー、WindowMoveArea など) のドライバーへの追加は Phase 4 と並行して行う。
 
 ### Phase 4 — テキスト (Sonnet 中心、基盤は Opus)
 - [Opus] スパイク S4。
