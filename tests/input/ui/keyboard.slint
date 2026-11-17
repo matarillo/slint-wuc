@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// A focus scope that has the keyboard focus, and records what reaches it.
+export component KeyboardTest inherits Window {
+    width: 200px;
+    height: 200px;
+    out property <bool> focused: scope.has-focus;
+    // What `key-pressed` and `key-released` answer: false rejects the event, so that it goes on.
+    in-out property <bool> accept-keys: true;
+    // The text, repeat flag and modifiers of the last key press, and of the last key release.
+    in-out property <string> pressed;
+    in-out property <string> released;
+    in-out property <bool> repeat;
+    in-out property <KeyboardModifiers> modifiers;
+    in-out property <KeyboardModifiers> released-modifiers;
+    // How many presses and releases came, and every key as "+text" or "-text".
+    in-out property <int> presses;
+    in-out property <int> releases;
+    in-out property <string> log;
+
+    scope := FocusScope {
+        key-pressed(event) => {
+            root.pressed = event.text;
+            root.repeat = event.repeat;
+            root.modifiers = event.modifiers;
+            root.presses += 1;
+            root.log += "+" + event.text;
+            root.accept-keys ? accept : reject
+        }
+        key-released(event) => {
+            root.released = event.text;
+            root.released-modifiers = event.modifiers;
+            root.releases += 1;
+            root.log += "-" + event.text;
+            root.accept-keys ? accept : reject
+        }
+    }
+
+    init => {
+        scope.focus();
+    }
+}

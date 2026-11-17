@@ -14,7 +14,7 @@ use crate::api::{
 };
 use crate::item_tree::ItemTreeRef;
 use crate::items::ItemRef;
-use crate::platform::{EventLoopProxy, WindowEvent};
+use crate::platform::{Clipboard, EventLoopProxy, WindowEvent};
 use crate::renderer::RendererSealed;
 use crate::visual_tree::VisualTree;
 use crate::window::{WindowAdapter, WindowAdapterInternal, WindowInner, WindowProperties};
@@ -30,7 +30,14 @@ use windows::UI::Composition::Compositor;
 use windows::UI::Composition::Desktop::DesktopWindowTarget;
 use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::DirectComposition::DCompositionWaitForCompositorClock;
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    SetClipboardData,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Memory::{
+    GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
+};
 use windows::Win32::System::Threading::{CreateEventW, INFINITE, SetEvent, WaitForMultipleObjects};
 use windows::Win32::System::WinRT::Composition::ICompositorDesktopInterop;
 use windows::Win32::System::WinRT::{
@@ -42,6 +49,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, w};
 
 mod input;
+mod keyboard;
 #[doc(hidden)]
 pub mod pointer;
 
@@ -230,7 +238,22 @@ impl crate::platform::Platform for Platform {
         }
     }
 
-    // TODO(phase 3): clipboard.
+    fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
+        // Only the default clipboard exists on Windows; the selection clipboard is X11's.
+        if clipboard != Clipboard::DefaultClipboard {
+            return;
+        }
+        if let Err(e) = write_clipboard_text(self.message_window, text) {
+            crate::debug_log!("cannot set the clipboard: {}", e.message());
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: Clipboard) -> Option<alloc::string::String> {
+        if clipboard != Clipboard::DefaultClipboard {
+            return None;
+        }
+        read_clipboard_text(self.message_window)
+    }
 
     fn debug_log(&self, arguments: core::fmt::Arguments) {
         let text = HSTRING::from(alloc::format!("{arguments}\n"));
@@ -263,6 +286,91 @@ impl Drop for Platform {
         unsafe {
             let _ = DestroyWindow(self.message_window);
         }
+    }
+}
+
+/// winuser.h's `CF_UNICODETEXT`: UTF-16 text with CRLF line breaks and a terminating NUL.
+const CF_UNICODETEXT: u32 = 13;
+
+/// Opens the clipboard for `owner`, which can fail while another program has it open.
+fn open_clipboard(owner: HWND) -> windows::core::Result<ClipboardGuard> {
+    let mut attempts = 0;
+    loop {
+        match unsafe { OpenClipboard(Some(owner)) } {
+            Ok(()) => return Ok(ClipboardGuard),
+            Err(_) if attempts < 10 => {
+                attempts += 1;
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// Closes the clipboard when dropped.
+struct ClipboardGuard;
+
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseClipboard();
+        }
+    }
+}
+
+/// Replaces the clipboard with `text`, which has `\n` line breaks.
+fn write_clipboard_text(owner: HWND, text: &str) -> windows::core::Result<()> {
+    let mut wide: alloc::vec::Vec<u16> = alloc::vec::Vec::with_capacity(text.len() + 1);
+    let mut previous = '\0';
+    for c in text.chars() {
+        if c == '\n' && previous != '\r' {
+            wide.push(u16::from(b'\r'));
+        }
+        previous = c;
+        wide.extend_from_slice(c.encode_utf16(&mut [0u16; 2]));
+    }
+    wide.push(0);
+
+    let _clipboard = open_clipboard(owner)?;
+    unsafe {
+        EmptyClipboard()?;
+        let memory = GlobalAlloc(GMEM_MOVEABLE, wide.len() * size_of::<u16>())?;
+        let destination = GlobalLock(memory) as *mut u16;
+        if destination.is_null() {
+            let _ = GlobalFree(Some(memory));
+            return Err(windows::core::Error::from_thread());
+        }
+        // SAFETY: the block is `wide.len()` u16 long.
+        core::ptr::copy_nonoverlapping(wide.as_ptr(), destination, wide.len());
+        let _ = GlobalUnlock(memory);
+        // The clipboard owns the memory once it has taken it.
+        if let Err(e) = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(memory.0))) {
+            let _ = GlobalFree(Some(memory));
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+/// The text on the clipboard, with `\n` line breaks.
+fn read_clipboard_text(owner: HWND) -> Option<alloc::string::String> {
+    unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) }.ok()?;
+    let _clipboard = open_clipboard(owner).ok()?;
+    unsafe {
+        let handle = GetClipboardData(CF_UNICODETEXT).ok()?;
+        let memory = HGLOBAL(handle.0);
+        let source = GlobalLock(memory) as *const u16;
+        if source.is_null() {
+            return None;
+        }
+        // The block ends with a NUL, but a program may have left it out.
+        let capacity = GlobalSize(memory) / size_of::<u16>();
+        // SAFETY: the block is `capacity` u16 long, and nothing changes it while it is locked.
+        let units = core::slice::from_raw_parts(source, capacity);
+        let length = units.iter().position(|&u| u == 0).unwrap_or(capacity);
+        let text = alloc::string::String::from_utf16_lossy(&units[..length]);
+        let _ = GlobalUnlock(memory);
+        Some(text.replace("\r\n", "\n"))
     }
 }
 
@@ -856,6 +964,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         return result;
     }
     if let Some(result) = pointer::handle(&adapter, hwnd, msg, wp) {
+        return result;
+    }
+    if let Some(result) = keyboard::handle(&adapter, hwnd, msg, wp, lp) {
         return result;
     }
     match msg {
