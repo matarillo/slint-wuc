@@ -153,6 +153,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Sonnet] テスト用の固定幅フォント (FixedTestFont) と `configure_test_fonts`。
 - [Sonnet] TextInput (キャレット、選択、アンドゥ)、TextInputInterface、text 系テストの移植。
 - **ゲート** [Opus]: 上流 `tests/cases` の text 系が通る。日本語 IME の手動チェックリストを満たす。
+- **状態**: 閉じた (2026-11-18)。text 38 件が通り、残り 2 件 (インタープリター、Phase 6 の `accessible_value`) は `tests/driver/exclusions.rs` に記載。テスト用フォントにより layout・elements の待ちケースも通った。Microsoft IME で、変換のインライン表示、候補ウィンドウの位置、文節移動、確定、取り消し、パスワード欄、フォーカス移動時の確定を `probe-text` で手動確認した。変換中の文字列がフォーカスを失うときの扱いは、将来の TSF 移行に備えて TSF に合わせた (フォーカス移動で確定、非アクティブ化で保持。IMM32 では IME 自身が非アクティブ化で確定する。`docs/design/input.md`)。持ち越し: 再変換 (`IMR_RECONVERTSTRING`、TSF 移行時の候補)、文字色の円錐グラデーション (Phase 5)、角丸クリップ (Phase 5)、16384 px を超えるテキスト (仮想サーフェス、Phase 7 の性能検証で判断)。
 
 ### Phase 5 — 画像・パス・エフェクト (Sonnet 中心、基盤は Opus)
 - [Opus] スパイク S5。
