@@ -1,6 +1,7 @@
 // Copyright © SixtyFPS GmbH <info@slint.dev>
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
+use i_slint_core::SharedString;
 use i_slint_core::host;
 use i_slint_core::platform::{Clipboard, Platform, PlatformError};
 use i_slint_core::window::{WindowAdapter, WindowInner};
@@ -15,6 +16,9 @@ std::thread_local! {
 
     /// The messages of `debug()` calls since the last [`TestingWindow::take_debug_log`].
     static DEBUG_LOGS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+
+    /// The last URL passed to `open_url`, which the platform records instead of opening.
+    static OPEN_URL: RefCell<Option<SharedString>> = const { RefCell::new(None) };
 }
 
 /// The windows that the platform created and that are still alive.
@@ -196,6 +200,11 @@ impl Platform for TestingPlatform {
         self.clipboard_slot(clipboard)?.borrow().clone()
     }
 
+    fn open_url(&self, url: &str) -> Result<(), PlatformError> {
+        OPEN_URL.with(|last| *last.borrow_mut() = Some(url.into()));
+        Ok(())
+    }
+
     fn debug_log(&self, arguments: core::fmt::Arguments) {
         DEBUG_LOGS.with(|logs| logs.borrow_mut().push(arguments.to_string()));
         i_slint_core::debug_log::default_log_message(arguments);
@@ -214,6 +223,16 @@ pub struct TestingWindow<'a> {
 
 #[cfg(feature = "internal")]
 impl TestingWindow<'_> {
+    /// Makes the popups of this window windows of their own instead of drawing them inside it.
+    pub fn use_native_popup(&self, native: bool) {
+        self.host.set_native_popup_for_testing(native);
+    }
+
+    /// The last URL that was passed to `open_url`.
+    pub fn open_url(&self) -> Option<SharedString> {
+        OPEN_URL.with(|last| last.borrow().clone())
+    }
+
     /// Drain and return all debug_log messages captured since the last call.
     pub fn take_debug_log(&self) -> Vec<String> {
         DEBUG_LOGS.with(|logs| logs.borrow_mut().drain(..).collect())

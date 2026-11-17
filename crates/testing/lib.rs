@@ -47,6 +47,7 @@ pub fn set_motion_preference(preference: MotionPreference) {
 }
 
 pub use i_slint_core::MotionPreference;
+pub use i_slint_core::items::{AccessibleLiveness, AccessibleRole, Orientation};
 
 /// Replace the font collection with embedded NotoSans fonts for deterministic test results.
 /// Must be called after initializing the testing platform (e.g. after [`init_no_event_loop()`]).

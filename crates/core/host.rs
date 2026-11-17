@@ -513,6 +513,8 @@ pub struct Win32WindowAdapter {
     /// What the window was asked for, for tests, as upstream's testing window records it.
     cursor_request: RefCell<crate::cursor::MouseCursorInner>,
     window_move_requests: Cell<usize>,
+    /// Whether tests want this window's popups as windows of their own.
+    native_popup: Cell<bool>,
     /// Only kept for detached windows: real ones hand the requests to the input method.
     ime_requests: RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>>,
     ime: ime::Ime,
@@ -552,6 +554,7 @@ impl Win32WindowAdapter {
             pointers: Default::default(),
             cursor_request: Default::default(),
             window_move_requests: Cell::new(0),
+            native_popup: Cell::new(false),
             ime_requests: Default::default(),
             ime: Default::default(),
         }))
@@ -696,6 +699,19 @@ impl Win32WindowAdapter {
     #[doc(hidden)]
     pub fn window_move_requests_for_testing(&self) -> usize {
         self.window_move_requests.get()
+    }
+
+    /// Asks for the popups of this window to be windows of their own instead of being drawn
+    /// inside it, as upstream's testing window does with `use_native_popup`.
+    #[doc(hidden)]
+    pub fn set_native_popup_for_testing(&self, native: bool) {
+        self.native_popup.set(native);
+    }
+
+    /// Whether tests asked for the popups of this window to be windows of their own.
+    #[doc(hidden)]
+    pub fn native_popup_for_testing(&self) -> bool {
+        self.native_popup.get()
     }
 
     /// Measures text in the family `FixedTestFont` with fixed metrics, as upstream's testing

@@ -3,10 +3,60 @@
 
 use core::ops::ControlFlow;
 use i_slint_core::SharedString;
-use i_slint_core::api::ComponentHandle;
-use i_slint_core::item_tree::{ItemTreeRc, ItemWeak};
-use i_slint_core::items::ItemRc;
+use i_slint_core::accessibility::{AccessibilityAction, AccessibleStringProperty};
+use i_slint_core::api::{ComponentHandle, LogicalPosition};
+use i_slint_core::item_tree::{ItemTreeRc, ItemWeak, ParentItemTraversalMode};
+use i_slint_core::items::{ItemRc, Opacity, PointerEventButton};
+use i_slint_core::platform::WindowEvent;
 use i_slint_core::window::WindowInner;
+use std::rc::Rc;
+use std::time::Duration;
+
+/// Delay in milliseconds between interpolated PointerMoved events during drag simulation
+/// (~one frame at 60 fps).
+const DRAG_STEP_DELAY_MS: u64 = 16;
+
+/// Distance in logical pixels between interpolated PointerMoved events during drag
+/// simulation. Chosen to be below the 8 px `DISTANCE_THRESHOLD` (see `flickable.rs`)
+/// so that every intermediate position is reported to the element.
+const DRAG_STEP_SIZE: f32 = 5.0;
+
+/// Synthesizes a drag from `start` to `end` against `window`: an initial
+/// `PointerMoved`+`PointerPressed`, interpolated `PointerMoved`s sized below the 8 px drag
+/// threshold (with `mock_elapsed_time` between each), and a final `PointerReleased`.
+///
+/// Exposed at module scope so that callers that don't have an `ElementHandle` (e.g. tests
+/// that drive raw window coordinates) can drive the same gesture as
+/// [`ElementHandle::mock_drag`].
+pub(crate) fn mock_drag_window(
+    window: &i_slint_core::api::Window,
+    start: LogicalPosition,
+    end: LogicalPosition,
+    button: PointerEventButton,
+) {
+    window.dispatch_event(WindowEvent::PointerMoved { position: start });
+    window.dispatch_event(WindowEvent::PointerPressed { position: start, button });
+
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let distance = (dx * dx + dy * dy).sqrt();
+
+    if distance > f32::EPSILON {
+        let steps = ((distance / DRAG_STEP_SIZE).ceil() as usize).max(2);
+
+        for i in 1..steps {
+            let t = i as f32 / steps as f32;
+            let pos = LogicalPosition::new(start.x + dx * t, start.y + dy * t);
+            crate::testing_platform::mock_elapsed_time(DRAG_STEP_DELAY_MS);
+            window.dispatch_event(WindowEvent::PointerMoved { position: pos });
+        }
+
+        crate::testing_platform::mock_elapsed_time(DRAG_STEP_DELAY_MS);
+        window.dispatch_event(WindowEvent::PointerMoved { position: end });
+    }
+
+    window.dispatch_event(WindowEvent::PointerReleased { position: end, button });
+}
 
 /// Shown when the application was built without element debug info.
 const MISSING_DEBUG_INFO_MESSAGE: &str = "The use of the ElementHandle API requires the presence of debug info in Slint compiler generated code. Set the `SLINT_EMIT_DEBUG_INFO=1` environment variable at application build time or use `compile_with_config` and `with_debug_info` with `slint_build`'s `CompilerConfiguration`";
@@ -18,6 +68,33 @@ fn warn_missing_debug_info() {
 mod internal {
     /// Used as base of another trait so it cannot be re-implemented
     pub trait Sealed {}
+}
+
+/// Describes the kind of layout an element represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+#[non_exhaustive]
+pub enum LayoutKind {
+    /// A `HorizontalLayout`.
+    HorizontalLayout,
+    /// A `VerticalLayout`.
+    VerticalLayout,
+    /// A `GridLayout`.
+    GridLayout,
+    /// A flex box layout.
+    FlexboxLayout,
+}
+
+impl LayoutKind {
+    fn from_encoded(s: &str) -> Option<Self> {
+        match s {
+            "h-box" => Some(Self::HorizontalLayout),
+            "v-box" => Some(Self::VerticalLayout),
+            "grid" => Some(Self::GridLayout),
+            "flex-box" => Some(Self::FlexboxLayout),
+            _ => None,
+        }
+    }
 }
 
 use internal::Sealed;
@@ -46,6 +123,9 @@ enum SingleElementMatch {
     MatchById { id: String, root_base: Option<String> },
     MatchByTypeName(String),
     MatchByTypeNameOrBase(String),
+    MatchByAccessibleRole(crate::AccessibleRole),
+    MatchByAccessibleLabel(String),
+    MatchByPredicate(Box<dyn Fn(&ElementHandle) -> bool>),
 }
 
 impl SingleElementMatch {
@@ -73,6 +153,13 @@ impl SingleElementMatch {
                     .is_some_and(|candidate_type_name| candidate_type_name == type_name)
                     || element.bases().is_some_and(|mut bases| bases.any(|base| base == type_name))
             }
+            SingleElementMatch::MatchByAccessibleRole(role) => {
+                element.accessible_role() == Some(*role)
+            }
+            SingleElementMatch::MatchByAccessibleLabel(label) => {
+                element.accessible_label().is_some_and(|candidate_label| candidate_label == label)
+            }
+            SingleElementMatch::MatchByPredicate(predicate) => (predicate)(element),
         }
     }
 }
@@ -87,6 +174,7 @@ impl ElementQueryInstruction {
         query_stack: &[Self],
         element: ElementHandle,
         control_flow_after_first_match: ControlFlow<()>,
+        active_popups: &[(ItemRc, ItemTreeRc)],
     ) -> (ControlFlow<()>, Vec<ElementHandle>) {
         let Some((query, tail)) = query_stack.split_first() else {
             return (control_flow_after_first_match, vec![element]);
@@ -95,12 +183,19 @@ impl ElementQueryInstruction {
         match query {
             ElementQueryInstruction::MatchDescendants => {
                 let mut results = Vec::new();
-                match element.visit_descendants_impl(&mut |child| {
-                    let (next_control_flow, sub_results) =
-                        Self::match_recursively(tail, child, control_flow_after_first_match);
-                    results.extend(sub_results);
-                    next_control_flow
-                }) {
+                match element.visit_descendants_impl(
+                    &mut |child| {
+                        let (next_control_flow, sub_results) = Self::match_recursively(
+                            tail,
+                            child,
+                            control_flow_after_first_match,
+                            active_popups,
+                        );
+                        results.extend(sub_results);
+                        next_control_flow
+                    },
+                    active_popups,
+                ) {
                     Some(_) => (ControlFlow::Break(()), results),
                     None => (ControlFlow::Continue(()), results),
                 }
@@ -108,8 +203,12 @@ impl ElementQueryInstruction {
             ElementQueryInstruction::MatchSingleElement(criteria) => {
                 let mut results = Vec::new();
                 let control_flow = if criteria.matches(&element) {
-                    let (next_control_flow, sub_results) =
-                        Self::match_recursively(tail, element, control_flow_after_first_match);
+                    let (next_control_flow, sub_results) = Self::match_recursively(
+                        tail,
+                        element,
+                        control_flow_after_first_match,
+                        active_popups,
+                    );
                     results.extend(sub_results);
                     next_control_flow
                 } else {
@@ -177,6 +276,30 @@ impl ElementQuery {
         self
     }
 
+    /// Include only elements in the results where [`ElementHandle::accessible_role()`] is equal to the provided `role`.
+    pub fn match_accessible_role(mut self, role: crate::AccessibleRole) -> Self {
+        self.query_stack.push(ElementQueryInstruction::MatchSingleElement(
+            SingleElementMatch::MatchByAccessibleRole(role),
+        ));
+        self
+    }
+
+    /// Include only elements in the results where [`ElementHandle::accessible_label()`] is equal to the provided `label`.
+    pub fn match_accessible_label(mut self, label: impl Into<String>) -> Self {
+        self.query_stack.push(ElementQueryInstruction::MatchSingleElement(
+            SingleElementMatch::MatchByAccessibleLabel(label.into()),
+        ));
+        self
+    }
+
+    /// Include only elements in the results for which `predicate` returns true.
+    pub fn match_predicate(mut self, predicate: impl Fn(&ElementHandle) -> bool + 'static) -> Self {
+        self.query_stack.push(ElementQueryInstruction::MatchSingleElement(
+            SingleElementMatch::MatchByPredicate(Box::new(predicate)),
+        ));
+        self
+    }
+
     /// Runs the query and returns the first result; returns None if no element matches the selected
     /// criteria.
     pub fn find_first(&self) -> Option<ElementHandle> {
@@ -184,6 +307,7 @@ impl ElementQuery {
             &self.query_stack,
             self.root.clone(),
             ControlFlow::Break(()),
+            &self.root.active_popups(),
         )
         .1
         .into_iter()
@@ -196,6 +320,7 @@ impl ElementQuery {
             &self.query_stack,
             self.root.clone(),
             ControlFlow::Continue(()),
+            &self.root.active_popups(),
         )
         .1
     }
@@ -206,7 +331,7 @@ impl ElementQuery {
 /// it is still alive.
 ///
 /// Obtain instances of `ElementHandle` by querying your application through
-/// [`Self::find_by_element_id()`].
+/// [`Self::find_by_accessible_label()`].
 #[derive(Clone)]
 #[repr(C)]
 pub struct ElementHandle {
@@ -240,24 +365,47 @@ impl ElementHandle {
 
     /// Visit all descendants of this element and call the visitor to each of them, until the visitor returns [`ControlFlow::Break`].
     /// When the visitor breaks, the function returns the value. If it doesn't break, the function returns None.
-    ///
-    /// Popups have no support in this runtime yet, so the visit doesn't enter them.
     pub fn visit_descendants<R>(
         &self,
         mut visitor: impl FnMut(ElementHandle) -> ControlFlow<R>,
     ) -> Option<R> {
-        self.visit_descendants_impl(&mut |e| visitor(e))
+        self.visit_descendants_impl(&mut |e| visitor(e), &self.active_popups())
     }
 
+    /// Visit all descendants of this element and call the visitor to each of them, until the visitor returns [`ControlFlow::Break`].
+    /// When the visitor breaks, the function returns the value. If it doesn't break, the function returns None.
     fn visit_descendants_impl<R>(
         &self,
         visitor: &mut dyn FnMut(ElementHandle) -> ControlFlow<R>,
+        active_popups: &[(ItemRc, ItemTreeRc)],
     ) -> Option<R> {
         let self_item = self.item.upgrade()?;
+
+        let visit_attached_popups =
+            |item_rc: &ItemRc, visitor: &mut dyn FnMut(ElementHandle) -> ControlFlow<R>| {
+                for (popup_elem, popup_item_tree) in active_popups {
+                    if popup_elem == item_rc
+                        && let Some(result) = (ElementHandle {
+                            item: ItemRc::new_root(popup_item_tree.clone()).downgrade(),
+                            element_index: 0,
+                        })
+                        .visit_descendants_impl(visitor, active_popups)
+                    {
+                        return Some(result);
+                    }
+                }
+                None
+            };
+
+        visit_attached_popups(&self_item, visitor);
 
         self_item.visit_descendants(move |item_rc| {
             if !item_rc.is_visible() {
                 return ControlFlow::Continue(());
+            }
+
+            if let Some(result) = visit_attached_popups(item_rc, visitor) {
+                return ControlFlow::Break(result);
             }
 
             let elements = ElementHandle::collect_elements(item_rc.clone());
@@ -277,6 +425,21 @@ impl ElementHandle {
             root: self.clone(),
             query_stack: vec![ElementQueryInstruction::MatchDescendants],
         }
+    }
+
+    /// This function searches through the entire tree of elements of `component`, looks for
+    /// elements that have a `accessible-label` property with the provided value `label`,
+    /// and returns an iterator over the found elements.
+    pub fn find_by_accessible_label(
+        component: &impl ElementRoot,
+        label: &str,
+    ) -> impl Iterator<Item = Self> {
+        component
+            .root_element()
+            .query_descendants()
+            .match_accessible_label(label)
+            .find_all()
+            .into_iter()
     }
 
     /// This function searches through the entire tree of elements of this window and looks for
@@ -367,6 +530,219 @@ impl ElementHandle {
         })
     }
 
+    /// Returns the layout kind if this element is a layout container;
+    /// None if the element is not a layout or is not valid anymore.
+    pub fn layout_kind(&self) -> Option<LayoutKind> {
+        self.item.upgrade().and_then(|item| {
+            item.element_layout_kind(self.element_index)
+                .and_then(|s| LayoutKind::from_encoded(s.as_str()))
+        })
+    }
+
+    /// Returns the value of the element's `accessible-role` property, if present. Use this property to
+    /// locate elements by their type/role, i.e. buttons, checkboxes, etc.
+    pub fn accessible_role(&self) -> Option<crate::AccessibleRole> {
+        self.item.upgrade().map(|item| item.accessible_role())
+    }
+
+    /// Returns the element's `@testable` properties, including inherited ones,
+    /// as `(name, type)` pairs.
+    /// Only properties declared `@testable` are listed, whatever their visibility;
+    /// they are kept alive for this purpose even when nothing else reads them.
+    ///
+    /// Returns `None` when the element is not valid anymore,
+    /// or when the application was built without debug info (see [`Self::id`]);
+    /// an element that declares no `@testable` property reports `Some` with an empty vector.
+    pub fn testable_properties(&self) -> Option<Vec<(SharedString, SharedString)>> {
+        if self.element_index != 0 {
+            return None;
+        }
+        self.item.upgrade().and_then(|item| {
+            let result = item.element_testable_properties();
+            if result.is_none() {
+                warn_missing_debug_info();
+            }
+            result
+        })
+    }
+
+    /// Returns the current value of the testable property `name` on this element,
+    /// encoded as a string:
+    /// booleans as `true`/`false`,
+    /// numbers in decimal (`length` in logical pixels, `duration` in milliseconds, `angle` in degrees),
+    /// colors and solid brushes as `#rrggbbaa`,
+    /// and enums as the `.slint` spelling of the value.
+    ///
+    /// Returns `None` when the element is not valid anymore,
+    /// the property does not exist (see [`Self::testable_properties`]),
+    /// its value has no string encoding,
+    /// or the application was built without debug info (see [`Self::id`]).
+    pub fn testable_property_value(&self, name: &str) -> Option<SharedString> {
+        if self.element_index != 0 {
+            return None;
+        }
+        self.item.upgrade().and_then(|item| item.element_testable_property_value(name))
+    }
+
+    /// Invokes the default accessible action on the element. For example a `MyButton` element might declare
+    /// an accessible default action that simulates a click, as in the following example:
+    ///
+    /// ```slint,no-preview
+    /// component MyButton {
+    ///     // ...
+    ///     callback clicked();
+    ///     in property <string> text;
+    ///
+    ///     TouchArea {
+    ///         clicked => { root.clicked() }
+    ///     }
+    ///     accessible-role: button;
+    ///     accessible-label: self.text;
+    ///     accessible-action-default => { self.clicked(); }
+    /// }
+    /// ```
+    pub fn invoke_accessible_default_action(&self) {
+        self.invoke_accessible_action(AccessibilityAction::Default)
+    }
+
+    /// Returns the value of the element's `accessible-value` property, if present.
+    pub fn accessible_value(&self) -> Option<SharedString> {
+        self.accessible_string_property(AccessibleStringProperty::Value)
+    }
+
+    /// Returns the value of the element's `accessible-placeholder-text` property, if present.
+    pub fn accessible_placeholder_text(&self) -> Option<SharedString> {
+        self.accessible_string_property(AccessibleStringProperty::PlaceholderText)
+    }
+
+    /// Sets the value of the element's `accessible-value` property. Note that you can only set this
+    /// property if it is declared in your Slint code.
+    pub fn set_accessible_value(&self, value: impl Into<SharedString>) {
+        self.invoke_accessible_action(AccessibilityAction::SetValue(value.into()))
+    }
+
+    /// Selects the text between two UTF-8 offsets, by invoking the element's
+    /// `accessible-action-set-selection-offsets` callback. Note that you can only do this if that callback
+    /// is declared in your Slint code.
+    pub fn set_accessible_selection_offsets(&self, anchor: i32, focus: i32) {
+        self.invoke_accessible_action(AccessibilityAction::SetSelectionOffsets(anchor, focus))
+    }
+
+    /// Returns the value of the element's `accessible-value-maximum` property, if present.
+    pub fn accessible_value_maximum(&self) -> Option<f32> {
+        self.accessible_parsed_property(AccessibleStringProperty::ValueMaximum)
+    }
+
+    /// Returns the value of the element's `accessible-value-minimum` property, if present.
+    pub fn accessible_value_minimum(&self) -> Option<f32> {
+        self.accessible_parsed_property(AccessibleStringProperty::ValueMinimum)
+    }
+
+    /// Returns the value of the element's `accessible-value-step` property, if present.
+    pub fn accessible_value_step(&self) -> Option<f32> {
+        self.accessible_parsed_property(AccessibleStringProperty::ValueStep)
+    }
+
+    /// Returns the value of the `accessible-label` property, if present.
+    pub fn accessible_label(&self) -> Option<SharedString> {
+        self.accessible_string_property(AccessibleStringProperty::Label)
+    }
+
+    /// Returns the value of the `accessible-enabled` property, if present
+    pub fn accessible_enabled(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::Enabled)
+    }
+
+    /// Returns the value of the `accessible-description` property, if present
+    pub fn accessible_description(&self) -> Option<SharedString> {
+        self.accessible_string_property(AccessibleStringProperty::Description)
+    }
+
+    /// Returns the value of the `accessible-id` property, if present
+    pub fn accessible_id(&self) -> Option<SharedString> {
+        self.accessible_string_property(AccessibleStringProperty::Id)
+    }
+
+    /// Returns the value of the `accessible-checked` property, if present
+    pub fn accessible_checked(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::Checked)
+    }
+
+    /// Returns the value of the `accessible-checkable` property, if present
+    pub fn accessible_checkable(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::Checkable)
+    }
+
+    /// Returns the value of the `accessible-item-selected` property, if present
+    pub fn accessible_item_selected(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::ItemSelected)
+    }
+
+    /// Returns the value of the `accessible-item-selectable` property, if present
+    pub fn accessible_item_selectable(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::ItemSelectable)
+    }
+
+    /// Returns the value of the element's `accessible-item-index` property, if present.
+    pub fn accessible_item_index(&self) -> Option<usize> {
+        self.accessible_parsed_property(AccessibleStringProperty::ItemIndex)
+    }
+
+    /// Returns the value of the element's `accessible-item-count` property, if present.
+    pub fn accessible_item_count(&self) -> Option<usize> {
+        self.accessible_parsed_property(AccessibleStringProperty::ItemCount)
+    }
+
+    /// Returns the value of the `accessible-expanded` property, if present
+    pub fn accessible_expanded(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::Expanded)
+    }
+
+    /// Returns the value of the `accessible-expandable` property, if present
+    pub fn accessible_expandable(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::Expandable)
+    }
+
+    /// Returns the value of the `accessible-read-only` property, if present
+    pub fn accessible_read_only(&self) -> Option<bool> {
+        self.accessible_parsed_property(AccessibleStringProperty::ReadOnly)
+    }
+
+    /// Returns the value of the `accessible-orientation` property, if present.
+    pub fn accessible_orientation(&self) -> Option<crate::Orientation> {
+        self.accessible_parsed_property(AccessibleStringProperty::Orientation)
+    }
+
+    /// Returns the value of the `accessible-live-region` property, if present.
+    pub fn accessible_live_region(&self) -> Option<crate::AccessibleLiveness> {
+        self.accessible_parsed_property(AccessibleStringProperty::LiveRegion)
+    }
+
+    /// An accessible property exists for the element itself only, not for the elements that
+    /// the compiler optimized into the same item.
+    fn accessible_string_property(&self, what: AccessibleStringProperty) -> Option<SharedString> {
+        if self.element_index != 0 {
+            return None;
+        }
+        self.item.upgrade().and_then(|item| item.accessible_string_property(what))
+    }
+
+    fn accessible_parsed_property<T: core::str::FromStr>(
+        &self,
+        what: AccessibleStringProperty,
+    ) -> Option<T> {
+        self.accessible_string_property(what)?.parse().ok()
+    }
+
+    fn invoke_accessible_action(&self, action: AccessibilityAction) {
+        if self.element_index != 0 {
+            return;
+        }
+        if let Some(item) = self.item.upgrade() {
+            item.accessible_action(&action)
+        }
+    }
+
     /// Returns the size of the element in logical pixels. This corresponds to the value of the `width` and
     /// `height` properties in Slint code. Returns a zero size if the element is not valid.
     pub fn size(&self) -> i_slint_core::api::LogicalSize {
@@ -387,4 +763,263 @@ impl ElementHandle {
             .map(i_slint_core::builtin_functions::item_absolute_position)
             .unwrap_or_default()
     }
+
+    /// Returns the opacity that is applied when rendering this element. This is the product of
+    /// the opacity property multiplied with any opacity specified by parent elements. Returns zero
+    /// if the element is not valid.
+    pub fn computed_opacity(&self) -> f32 {
+        self.item
+            .upgrade()
+            .map(|mut item| {
+                let mut opacity = 1.0;
+                while let Some(parent) = item.parent_item(ParentItemTraversalMode::StopAtPopups) {
+                    if let Some(opacity_item) =
+                        i_slint_core::items::ItemRef::downcast_pin::<Opacity>(item.borrow())
+                    {
+                        opacity *= opacity_item.opacity();
+                    }
+                    item = parent.clone();
+                }
+                opacity
+            })
+            .unwrap_or(0.0)
+    }
+
+    /// Invokes the element's `accessible-action-increment` callback, if declared. On widgets such as spinboxes, this
+    /// typically increments the value.
+    pub fn invoke_accessible_increment_action(&self) {
+        self.invoke_accessible_action(AccessibilityAction::Increment)
+    }
+
+    /// Invokes the element's `accessible-action-decrement` callback, if declared. On widgets such as spinboxes, this
+    /// typically decrements the value.
+    pub fn invoke_accessible_decrement_action(&self) {
+        self.invoke_accessible_action(AccessibilityAction::Decrement)
+    }
+
+    /// Invokes the element's `accessible-action-expand` callback, if declared. On widgets such as combo boxes, this
+    /// typically discloses the list of available choices.
+    pub fn invoke_accessible_expand_action(&self) {
+        self.invoke_accessible_action(AccessibilityAction::Expand)
+    }
+
+    pub(crate) fn window_adapter(&self) -> Option<Rc<dyn i_slint_core::window::WindowAdapter>> {
+        self.item.upgrade().and_then(|item| item.window_adapter())
+    }
+
+    /// Move the mouse to the element center and press the pointer.
+    fn pointer_pressed(&self, button: PointerEventButton) {
+        let Some(window_adapter) = self.window_adapter() else {
+            return;
+        };
+        let window = window_adapter.window();
+        let position = self.absolute_center();
+
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerPressed { position, button });
+    }
+
+    /// Move the mouse to the element center and release the pointer.
+    fn pointer_released(&self, button: PointerEventButton) {
+        let Some(window_adapter) = self.window_adapter() else {
+            return;
+        };
+        let window = window_adapter.window();
+        let position = self.absolute_center();
+
+        window.dispatch_event(WindowEvent::PointerMoved { position });
+        window.dispatch_event(WindowEvent::PointerReleased { position, button });
+    }
+
+    /// Simulates a single click (or touch tap) on the element at its center point with the
+    /// specified button.
+    pub async fn single_click(&self, button: PointerEventButton) {
+        self.pointer_pressed(button);
+
+        wait_for(Duration::from_millis(50)).await;
+
+        self.pointer_released(button);
+    }
+
+    /// Simulates a single click (or touch tap) on the element at its center point with the
+    /// specified button.
+    ///
+    /// Compared to [Self::single_click()], this function uses mock time instead
+    /// of an actual timer, so that it can be used in our internal tests that do not have an
+    /// event loop.
+    pub fn mock_single_click(&self, button: PointerEventButton) {
+        self.pointer_pressed(button);
+
+        crate::testing_platform::mock_elapsed_time(50);
+
+        self.pointer_released(button);
+    }
+
+    /// Simulates a double click (or touch tap) on the element at its center point.
+    pub async fn double_click(&self, button: PointerEventButton) {
+        let Ok(click_interval) =
+            i_slint_core::with_existing_context(|ctx| ctx.platform().click_interval())
+        else {
+            return;
+        };
+        let Some(duration_recognized_as_double_click) =
+            click_interval.checked_sub(std::time::Duration::from_millis(10))
+        else {
+            return;
+        };
+
+        let Some(single_click_duration) = duration_recognized_as_double_click.checked_div(2) else {
+            return;
+        };
+
+        self.pointer_pressed(button);
+
+        wait_for(single_click_duration).await;
+
+        self.pointer_released(button);
+        self.pointer_pressed(button);
+
+        wait_for(single_click_duration).await;
+
+        self.pointer_released(button);
+    }
+
+    /// Simulates a drag gesture from the element's center to the given target position.
+    ///
+    /// The sequence is:
+    /// 1. `PointerMoved` + `PointerPressed` at the element center
+    /// 2. Interpolated `PointerMoved` events from center to `target` (step size ~5 logical
+    ///    pixels, with a 16 ms delay between steps)
+    /// 3. `PointerMoved` + `PointerReleased` at `target`
+    ///
+    /// The step size is chosen to be smaller than the 8 px drag/flick detection threshold
+    /// so that intermediate positions are always reported.
+    pub async fn drag(&self, target: LogicalPosition, button: PointerEventButton) {
+        let Some(window_adapter) = self.window_adapter() else {
+            return;
+        };
+        let window = window_adapter.window();
+        let start = self.absolute_center();
+
+        // Press at element center.
+        window.dispatch_event(WindowEvent::PointerMoved { position: start });
+        window.dispatch_event(WindowEvent::PointerPressed { position: start, button });
+
+        // Interpolate intermediate moves.
+        let dx = target.x - start.x;
+        let dy = target.y - start.y;
+        let distance = (dx * dx + dy * dy).sqrt();
+
+        if distance > f32::EPSILON {
+            // At least 2 steps to guarantee the drag threshold is crossed.
+            let steps = ((distance / DRAG_STEP_SIZE).ceil() as usize).max(2);
+
+            for i in 1..steps {
+                let t = i as f32 / steps as f32;
+                let pos = LogicalPosition::new(start.x + dx * t, start.y + dy * t);
+                wait_for(Duration::from_millis(DRAG_STEP_DELAY_MS)).await;
+                window.dispatch_event(WindowEvent::PointerMoved { position: pos });
+            }
+
+            // Final move to exact target.
+            wait_for(Duration::from_millis(DRAG_STEP_DELAY_MS)).await;
+            window.dispatch_event(WindowEvent::PointerMoved { position: target });
+        }
+
+        window.dispatch_event(WindowEvent::PointerReleased { position: target, button });
+    }
+
+    /// Simulates a drag gesture from the element's center to the given target position.
+    ///
+    /// Compared to [Self::drag()], this function uses mock time instead
+    /// of an actual timer, so that it can be used in internal tests without an event loop.
+    pub fn mock_drag(&self, target: LogicalPosition, button: PointerEventButton) {
+        let Some(window_adapter) = self.window_adapter() else {
+            return;
+        };
+        mock_drag_window(window_adapter.window(), self.absolute_center(), target, button);
+    }
+
+    /// The center of the element in the coordinate system that input events are dispatched in.
+    /// Unlike [`Self::absolute_position()`] this includes the location of an enclosing popup that's
+    /// rendered inside the window, such as a menu.
+    pub(crate) fn absolute_center(&self) -> LogicalPosition {
+        let Some(item) = self.item.upgrade() else {
+            return Default::default();
+        };
+        // Map the center rather than mapping the origin and adding a local half-extent,
+        // which ignores any scale or rotation an ancestor applies (#13242).
+        i_slint_core::lengths::logical_position_to_api(
+            item.map_to_native_window(item.geometry().center()),
+        )
+    }
+
+    /// Scrolls the element by `delta_x` and `delta_y` logical pixels, as a mouse wheel would
+    /// with the pointer at the center of the element.
+    pub fn scroll(&self, delta_x: f32, delta_y: f32) {
+        let Some(window_adapter) = self.window_adapter() else {
+            return;
+        };
+        let window = window_adapter.window();
+
+        let center = self.absolute_center();
+        window.dispatch_event(WindowEvent::PointerScrolled { position: center, delta_x, delta_y });
+    }
+
+    fn active_popups(&self) -> Vec<(ItemRc, ItemTreeRc)> {
+        self.window_adapter()
+            .map(|window_adapter| {
+                let window = WindowInner::from_pub(window_adapter.window());
+                window
+                    .active_popups()
+                    .iter()
+                    .filter_map(|popup| {
+                        Some((popup.parent_item.upgrade()?, popup.component.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+async fn wait_for(duration: std::time::Duration) {
+    enum AsyncTimerState {
+        Starting,
+        Waiting(std::task::Waker),
+        Done,
+    }
+
+    let state = std::rc::Rc::new(std::cell::RefCell::new(AsyncTimerState::Starting));
+
+    std::future::poll_fn(move |context| {
+        let mut current_state = state.borrow_mut();
+        match *current_state {
+            AsyncTimerState::Starting => {
+                *current_state = AsyncTimerState::Waiting(context.waker().clone());
+                let state_clone = state.clone();
+                i_slint_core::timers::Timer::single_shot(duration, move || {
+                    let mut current_state = state_clone.borrow_mut();
+                    match *current_state {
+                        AsyncTimerState::Starting => unreachable!(),
+                        AsyncTimerState::Waiting(ref waker) => {
+                            waker.wake_by_ref();
+                            *current_state = AsyncTimerState::Done;
+                        }
+                        AsyncTimerState::Done => {}
+                    }
+                });
+
+                std::task::Poll::Pending
+            }
+            AsyncTimerState::Waiting(ref existing_waker) => {
+                let new_waker = context.waker();
+                if !existing_waker.will_wake(new_waker) {
+                    *current_state = AsyncTimerState::Waiting(new_waker.clone());
+                }
+                std::task::Poll::Pending
+            }
+            AsyncTimerState::Done => std::task::Poll::Ready(()),
+        }
+    })
+    .await
 }
