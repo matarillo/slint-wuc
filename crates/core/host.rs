@@ -7,8 +7,8 @@
 //! compositor clock while animations run and posts one coalesced message per tick.
 
 use crate::api::{
-    EventLoopError, PhysicalPosition, PhysicalSize, PlatformError, Window, WindowPosition,
-    WindowSize,
+    EventLoopError, LogicalSize, PhysicalPosition, PhysicalSize, PlatformError, Window,
+    WindowPosition, WindowSize,
 };
 use crate::item_tree::ItemTreeRef;
 use crate::items::ItemRef;
@@ -376,6 +376,10 @@ pub struct Win32WindowAdapter {
     size: Cell<PhysicalSize>,
     /// A size set before the HWND exists, applied once its scale factor is known.
     requested_size: Cell<Option<WindowSize>>,
+    /// Whether someone set the size: `set_size`, or the preferred size of the layout.
+    size_set: Cell<bool>,
+    /// The title, kept for when the HWND is created.
+    title: RefCell<HSTRING>,
     sync_pending: Cell<bool>,
     visible: Cell<bool>,
 }
@@ -403,6 +407,8 @@ impl Win32WindowAdapter {
             renderer: Renderer::new(tree),
             size: Cell::new(PhysicalSize::new(800, 600)),
             requested_size: Cell::new(None),
+            size_set: Cell::new(false),
+            title: RefCell::new(HSTRING::new()),
             sync_pending: Cell::new(false),
             visible: Cell::new(false),
         }))
@@ -475,8 +481,7 @@ impl Win32WindowAdapter {
             CreateWindowExW(
                 WS_EX_NOREDIRECTIONBITMAP,
                 w!("SlintWindow"),
-                // `update_window_properties` sets the title.
-                w!(""),
+                &*self.title.borrow(),
                 WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
@@ -589,6 +594,7 @@ impl WindowAdapter for Win32WindowAdapter {
     }
 
     fn set_size(&self, requested: WindowSize) {
+        self.size_set.set(true);
         let size = requested.to_physical(self.window.scale_factor());
         let Some(hwnd) = self.hwnd.get() else {
             if !self.detached {
@@ -641,10 +647,37 @@ impl WindowAdapter for Win32WindowAdapter {
     }
 
     fn update_window_properties(&self, properties: WindowProperties<'_>) {
-        if let Some(hwnd) = self.hwnd.get() {
-            unsafe {
-                let _ = SetWindowTextW(hwnd, &HSTRING::from(properties.title().as_str()));
+        let title = HSTRING::from(properties.title().as_str());
+        if *self.title.borrow() != title {
+            if let Some(hwnd) = self.hwnd.get() {
+                unsafe {
+                    let _ = SetWindowTextW(hwnd, &title);
+                }
             }
+            self.title.replace(title);
+        }
+
+        let constraints = properties.layout_constraints();
+        let current = self.size.get().to_logical(self.window.scale_factor());
+        // Without a size of its own, the window takes the layout's preferred size;
+        // an axis the layout has no preference for keeps the default.
+        let mut size = if self.size_set.get() {
+            current
+        } else {
+            let preferred = constraints.preferred;
+            LogicalSize::new(
+                if preferred.width > 0. { preferred.width } else { current.width },
+                if preferred.height > 0. { preferred.height } else { current.height },
+            )
+        };
+        if let Some(min) = constraints.min {
+            size = LogicalSize::new(size.width.max(min.width), size.height.max(min.height));
+        }
+        if let Some(max) = constraints.max {
+            size = LogicalSize::new(size.width.min(max.width), size.height.min(max.height));
+        }
+        if !self.size_set.get() || size != current {
+            self.set_size(WindowSize::Logical(size));
         }
     }
 

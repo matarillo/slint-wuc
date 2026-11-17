@@ -8,17 +8,10 @@ const INPUT_AND_IMAGES: &str =
 
 const TEST_FONTS: &str =
     "text measured with the system font, as configure_test_fonts does nothing until phase 4";
-const WINDOW_SIZE: &str = "BUG: show() leaves the window at its default 800x600 size; Win32WindowAdapter::update_window_properties ignores the layout constraints, so the window never takes the preferred size of its component";
 
 /// Cases that are generated and compiled, but ignored when running.
 pub const IGNORED: &[(&str, &str)] = &[
     ("layout/box_layout_repeated_height_for_width_edition_1_18.slint", TEST_FONTS),
-    ("layout/fixed_width_window_wrapped_text_height.slint", WINDOW_SIZE),
-    ("layout/max_width_window_wrapped_text_height.slint", WINDOW_SIZE),
-    ("layout/min_width_window_wrapped_text_height.slint", WINDOW_SIZE),
-    ("layout/preferred_width_window_wrapped_text_height.slint", WINDOW_SIZE),
-    ("layout/resized_window_wrapped_text_min_height.slint", WINDOW_SIZE),
-    ("layout/window_fixed.slint", WINDOW_SIZE),
 ];
 
 /// Cases that aren't generated: the Slint compiler or the Rust compiler rejects them.
