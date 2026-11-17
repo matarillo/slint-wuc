@@ -534,6 +534,16 @@ impl Win32WindowAdapter {
         }
     }
 
+    /// The window rectangle size that keeps the intended logical size at `dpi`, unless the
+    /// window is maximized or minimized.
+    fn dpi_scaled_frame(&self, hwnd: HWND, dpi: u32) -> Option<(i32, i32)> {
+        let logical = self.logical_size.get()?;
+        if unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() } {
+            return None;
+        }
+        Some(self.frame_size(hwnd, to_physical(logical, dpi), dpi))
+    }
+
     /// The window rectangle size for a client of `client` physical pixels at `dpi`.
     fn frame_size(&self, hwnd: HWND, client: PhysicalSize, dpi: u32) -> (i32, i32) {
         let mut rc =
@@ -752,33 +762,59 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let size = PhysicalSize::new((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
             // A size that the intended logical size doesn't explain comes from the user.
             let intended = adapter.logical_size.get().map(|l| to_physical(l, adapter.dpi()));
-            if !adapter.in_dpi_change.get() && intended != Some(size) {
+            let from_user = !adapter.in_dpi_change.get() && intended != Some(size);
+            if from_user {
                 adapter.logical_size.set(Some(size.to_logical(adapter.window.scale_factor())));
             }
+            trace_dpi(format_args!(
+                "WM_SIZE {}x{} dpi={} in_dpi_change={} intended={intended:?} -> logical={:?}",
+                size.width,
+                size.height,
+                adapter.dpi(),
+                adapter.in_dpi_change.get(),
+                adapter.logical_size.get()
+            ));
             adapter.resized(size);
             LRESULT(0)
         }
         WM_GETDPISCALEDSIZE => {
-            // Without an answer, Windows scales the window rectangle linearly. The frame
-            // doesn't scale linearly, so the logical client size would drift.
-            let Some(logical) = adapter.logical_size.get() else { return LRESULT(0) };
-            if unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() } {
-                return LRESULT(0);
-            }
             let dpi = (wp.0 & 0xffff) as u32;
-            let (width, height) = adapter.frame_size(hwnd, to_physical(logical, dpi), dpi);
             // SAFETY: WM_GETDPISCALEDSIZE's lParam points to the proposed window size.
             let proposed = unsafe { &mut *(lp.0 as *mut SIZE) };
-            proposed.cx = width;
-            proposed.cy = height;
+            let Some(frame) = adapter.dpi_scaled_frame(hwnd, dpi) else {
+                trace_dpi(format_args!(
+                    "WM_GETDPISCALEDSIZE dpi={} -> {dpi}: default for {}x{}",
+                    adapter.dpi(),
+                    proposed.cx,
+                    proposed.cy
+                ));
+                return LRESULT(0);
+            };
+            trace_dpi(format_args!(
+                "WM_GETDPISCALEDSIZE dpi={} -> {dpi}: {}x{} becomes {}x{}",
+                adapter.dpi(),
+                proposed.cx,
+                proposed.cy,
+                frame.0,
+                frame.1
+            ));
+            (proposed.cx, proposed.cy) = frame;
             LRESULT(1)
         }
         WM_DPICHANGED => {
-            let scale = (wp.0 & 0xffff) as f32 / 96.0;
+            let dpi = (wp.0 & 0xffff) as u32;
             adapter.in_dpi_change.set(true);
-            adapter.scale_factor_changed(scale);
+            adapter.scale_factor_changed(dpi as f32 / 96.0);
             // SAFETY: WM_DPICHANGED's lParam points to the suggested window rectangle.
             if let Some(r) = unsafe { (lp.0 as *const RECT).as_ref() } {
+                // The suggested rectangle has the size WM_GETDPISCALEDSIZE answered.
+                trace_dpi(format_args!(
+                    "WM_DPICHANGED dpi={dpi} suggested {}x{} at {},{}",
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    r.left,
+                    r.top
+                ));
                 unsafe {
                     let _ = SetWindowPos(
                         hwnd,
@@ -793,7 +829,12 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             // `SetWindowPos` sends no WM_SIZE when the physical size stays the same, and the
             // logical size must follow the new scale anyway.
-            adapter.resized(client_size(hwnd));
+            let client = client_size(hwnd);
+            trace_dpi(format_args!(
+                "WM_DPICHANGED done: client {}x{}",
+                client.width, client.height
+            ));
+            adapter.resized(client);
             adapter.in_dpi_change.set(false);
             LRESULT(0)
         }
@@ -817,6 +858,14 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
+    }
+}
+
+/// Prints how the window follows DPI changes when `SLINT_FORK_TRACE_DPI` is set.
+fn trace_dpi(args: core::fmt::Arguments) {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ENABLED.get_or_init(|| std::env::var_os("SLINT_FORK_TRACE_DPI").is_some()) {
+        eprintln!("[dpi] {args}");
     }
 }
 
