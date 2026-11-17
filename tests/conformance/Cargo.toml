@@ -1,0 +1,22 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[package]
+name = "slint-fork-conformance"
+description = "Checks that the items of this runtime match the names the unmodified upstream compiler uses"
+authors.workspace = true
+edition = "2024"
+license.workspace = true
+publish = false
+rust-version.workspace = true
+version = "0.0.0"
+
+[[test]]
+name = "conformance"
+path = "conformance.rs"
+
+[dev-dependencies]
+# The compiler is out of scope for this fork: the test uses the published one, unmodified.
+i-slint-compiler = "=1.19.0"
+i-slint-common = { workspace = true }
+i-slint-core = { path = "../../crates/core", features = ["rtti"] }
