@@ -1,0 +1,58 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[workspace]
+members = ["crates/core", "crates/core-macros", "crates/common"]
+# `reference/` is the read-only upstream Slint tree; `spikes/` is its own workspace.
+exclude = ["reference", "spikes"]
+resolver = "3"
+
+[workspace.package]
+authors = ["Slint Developers <info@slint.dev>"]
+documentation = "https://slint.dev/docs"
+homepage = "https://slint.dev"
+license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0"
+repository = "https://github.com/slint-ui/slint"
+rust-version = "1.95"
+version = "1.19.0"
+
+[workspace.dependencies]
+i-slint-common = { version = "=1.19.0", path = "crates/common", default-features = false }
+i-slint-core-macros = { version = "=1.19.0", path = "crates/core-macros", default-features = false }
+
+# Published on crates.io rather than vendored.
+vtable = { version = "0.5.1" }
+
+bytemuck = { version = "1.13.1" }
+clru = { version = "0.6.0" }
+derive_more = { version = "2.0.0", default-features = false, features = ["deref", "deref_mut", "into", "from", "add", "add_assign", "mul", "not", "display"] }
+euclid = { version = "0.22.1", default-features = false }
+swash = { version = "0.2.7", default-features = false }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+log = { version = "0.4.17" }
+# `svgz` was unconditional until resvg 0.48 gated it behind a feature. Slint accepts
+# compressed SVGs (`.svgz`), so keep it enabled or usvg rejects them at parse time.
+resvg = { version = "0.49.0", default-features = false, features = ["text", "raster-images", "svgz"] }
+rustybuzz = { version = "0.20.0" }
+serde = { version = "1.0.163", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.96" }
+strum = { version = "0.28", default-features = false, features = ["derive"] }
+ttf-parser = { version = "0.25" }
+web-sys = { version = "0.3.72", default-features = false }
+raw-window-handle-06 = { package = "raw-window-handle", version = "0.6", features = ["alloc"] }
+
+# Note: We're migrating our unicode handling over to the icu family of crates.
+# Prefer using icu crates over adding more unicode-* dependencies
+# parley uses the icu crates internally as well, so we'll share the dependency there.
+unicode-segmentation = { version = "1.12.0" }
+icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
+
+wgpu-29 = { package = "wgpu", version = "29.0.4", default-features = false }
+wgpu-30 = { package = "wgpu", version = "30", default-features = false }
+tr = { version = "0.1", default-features = false }
+fontique = { version = "0.12.0" }
+# Pinned to match parley's version
+skrifa = { version = "0.44" }
+windows = { version = "0.62" }
+lyon_path = { version = "1.0", default-features = false }
+objc2 = { version = "0.6.3" }
