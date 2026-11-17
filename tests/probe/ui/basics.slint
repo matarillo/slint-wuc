@@ -1,0 +1,55 @@
+// Rectangles, borders, gradients, a binding, and a repeater: what Phases 1 and 2 show.
+export component App inherits Window {
+    width: 300px;
+    height: 200px;
+    title: "Probe: basics";
+    background: #202020;
+
+    in-out property <bool> toggled;
+    in-out property <int> count: 3;
+
+    Rectangle {
+        x: 20px;
+        y: 20px;
+        width: 100px;
+        height: 60px;
+        background: root.toggled ? #ff0000 : #0000ff;
+
+        Rectangle {
+            x: 10px;
+            y: 10px;
+            width: 30px;
+            height: 30px;
+            background: #ffff00;
+        }
+    }
+
+    Rectangle {
+        x: 140px;
+        y: 20px;
+        width: 120px;
+        height: 120px;
+        border-radius: 12px;
+        border-width: 4px;
+        border-color: #ffffff;
+        background: @linear-gradient(90deg, #ff0000 0%, #0000ff 100%);
+    }
+
+    // Finishes within one step of `--check`, but only if frames tick while it runs.
+    Rectangle {
+        x: root.toggled ? 250px : 140px;
+        y: 160px;
+        width: 20px;
+        height: 20px;
+        background: #ff00ff;
+        animate x { duration: 100ms; }
+    }
+
+    for i in root.count: Rectangle {
+        x: 20px + i * 40px;
+        y: 150px;
+        width: 30px;
+        height: 30px;
+        background: #00ff00;
+    }
+}

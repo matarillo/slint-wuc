@@ -1,0 +1,250 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+//! Module containing the private api that is used by the generated code.
+//!
+//! This is internal API that shouldn't be used because compatibility is not
+//! guaranteed
+#![doc(hidden)]
+
+use core::pin::Pin;
+use re_exports::*;
+
+// Helper functions called from generated code to reduce code bloat from
+// extra copies of the original functions for each call site due to
+// the impl Fn() they are taking.
+//
+// The functions generic over `StrongItemTreeRef` serve global components;
+// regular components use the `*_erased` functions from `re_exports`, which
+// are not monomorphized per component.
+
+pub trait StrongItemTreeRef: Sized {
+    type Weak: Clone + 'static;
+    fn to_weak(&self) -> Self::Weak;
+    fn from_weak(weak: &Self::Weak) -> Option<Self>;
+}
+
+impl<C: 'static> StrongItemTreeRef for Pin<Rc<C>> {
+    type Weak = PinWeak<C>;
+    fn to_weak(&self) -> Self::Weak {
+        PinWeak::downgrade(self.clone())
+    }
+    fn from_weak(weak: &Self::Weak) -> Option<Self> {
+        weak.upgrade()
+    }
+}
+
+pub fn set_property_binding<
+    T: Clone + Default + 'static,
+    StrongRef: StrongItemTreeRef + 'static,
+>(
+    property: Pin<&Property<T>>,
+    component_strong: &StrongRef,
+    binding: fn(StrongRef) -> T,
+) {
+    let weak = component_strong.to_weak();
+    property.set_binding(move || {
+        <StrongRef as StrongItemTreeRef>::from_weak(&weak).map(binding).unwrap_or_default()
+    })
+}
+
+pub fn set_animated_property_binding<
+    T: Clone + i_slint_core::properties::InterpolatedPropertyValue + 'static,
+    StrongRef: StrongItemTreeRef + 'static,
+>(
+    property: Pin<&Property<T>>,
+    component_strong: &StrongRef,
+    binding: fn(StrongRef) -> T,
+    compute_animation_details: fn(
+        StrongRef,
+    )
+        -> (PropertyAnimation, Option<i_slint_core::animations::Instant>),
+) {
+    let weak_1 = component_strong.to_weak();
+    let weak_2 = weak_1.clone();
+    property.set_animated_binding(
+        move || binding(<StrongRef as StrongItemTreeRef>::from_weak(&weak_1).unwrap()),
+        move || {
+            compute_animation_details(<StrongRef as StrongItemTreeRef>::from_weak(&weak_2).unwrap())
+        },
+    )
+}
+
+pub fn set_property_state_binding<StrongRef: StrongItemTreeRef + 'static>(
+    property: Pin<&Property<StateInfo>>,
+    component_strong: &StrongRef,
+    binding: fn(StrongRef) -> i32,
+) {
+    let weak = component_strong.to_weak();
+    re_exports::set_state_binding(property, move || {
+        binding(<StrongRef as StrongItemTreeRef>::from_weak(&weak).unwrap())
+    })
+}
+
+pub fn set_callback_handler<
+    Arg: ?Sized + 'static,
+    Ret: Default + 'static,
+    StrongRef: StrongItemTreeRef + 'static,
+>(
+    callback: Pin<&Callback<Arg, Ret>>,
+    component_strong: &StrongRef,
+    handler: fn(StrongRef, &Arg) -> Ret,
+) {
+    let weak = component_strong.to_weak();
+    callback.set_handler(move |arg| {
+        handler(<StrongRef as StrongItemTreeRef>::from_weak(&weak).unwrap(), arg)
+    })
+}
+
+pub fn debug(ctx: &i_slint_core::SlintContext, s: SharedString) {
+    ctx.dispatch_log_message(i_slint_core::debug_log::LogMessage::new(
+        i_slint_core::debug_log::LogMessageSource::SlintCode,
+        None,
+        format_args!("{s}"),
+    ));
+}
+
+/// Create the platform if it doesn't exist yet, and return the current context.
+pub fn ensure_context() -> Result<i_slint_core::SlintContext, crate::PlatformError> {
+    crate::with_context(|ctx| ctx.clone())
+}
+
+/// The native widgets of the Qt style, which this runtime doesn't have.
+pub mod native_widgets {}
+
+/// Create a repeated component or a popup of the generated code:
+/// register the items of `item_tree` with `window_adapter` and run `init`.
+pub fn new_item_tree<T: vtable::HasStaticVTable<ItemTreeVTable> + 'static, Globals>(
+    item_tree: T,
+    window_adapter: Option<WindowAdapterRc>,
+    globals: Globals,
+    init: fn(VRcMapped<ItemTreeVTable, T>, Globals, u32, u32) -> Result<(), crate::PlatformError>,
+) -> Result<VRc<ItemTreeVTable, T>, crate::PlatformError> {
+    let self_rc = VRc::new(item_tree);
+    register_item_tree(&VRc::into_dyn(self_rc.clone()), window_adapter);
+    init(VRc::map(self_rc.clone(), |x| x), globals, 0, 1)?;
+    Ok(self_rc)
+}
+
+/// The `visit_dynamic` argument of `visit_item_tree` for an item tree without repeaters.
+pub fn no_dynamic_children(
+    _: TraversalOrder,
+    _: ItemVisitorRefMut<'_>,
+    _: u32,
+) -> VisitChildrenResult {
+    unreachable!()
+}
+
+/// Returns the item at `index` in the tree `nodes` of a generated item tree,
+/// whose items are at the offsets `item_array`.
+///
+/// Panics if `index` refers to a dynamic tree.
+pub fn get_item_ref<'a, T>(
+    item_tree: Pin<&'a T>,
+    nodes: &[ItemTreeNode],
+    item_array: &[VOffset<T, ItemVTable, AllowPin>],
+    index: u32,
+) -> Pin<ItemRef<'a>> {
+    fn item_array_index(nodes: &[ItemTreeNode], index: u32) -> usize {
+        match &nodes[index as usize] {
+            ItemTreeNode::Item { item_array_index, .. } => *item_array_index as usize,
+            ItemTreeNode::DynamicTree { .. } => panic!("get_item_ref called on dynamic tree"),
+        }
+    }
+    item_array[item_array_index(nodes, index)].apply_pin(item_tree)
+}
+
+/// Wrapper around `SlintContext::translate` for the generated code
+pub fn translate(
+    ctx: &i_slint_core::SlintContext,
+    origin: SharedString,
+    context: SharedString,
+    domain: SharedString,
+    args: Slice<SharedString>,
+    n: i32,
+    plural: SharedString,
+) -> SharedString {
+    ctx.translate(&origin, &context, &domain, args.as_slice(), n, &plural)
+}
+
+#[cfg(feature = "gettext")]
+pub fn init_translations(domain: &str, dirname: impl Into<std::path::PathBuf>) {
+    i_slint_core::translations::gettext_bindtextdomain(domain, dirname.into()).unwrap()
+}
+
+/// Runs one chunk of a big array literal, which the generated code splits so that
+/// no function constructs too many elements at once.
+/// Each closure gets its own instantiation, and `inline(never)` keeps them apart.
+#[inline(never)]
+pub fn build_array_chunk(chunk: impl FnOnce()) {
+    chunk()
+}
+
+/// internal re_exports used by the macro generated
+pub mod re_exports {
+    pub use alloc::boxed::Box;
+    pub use alloc::rc::{Rc, Weak};
+    pub use alloc::string::String;
+    pub use alloc::{vec, vec::Vec};
+    pub use const_field_offset::{self, FieldOffsets, PinnedDrop};
+    pub use core::iter::FromIterator;
+    pub use core::option::{Option, Option::*};
+    pub use core::result::{Result, Result::*};
+    pub use i_slint_core::styled_text::{StyledText, parse_markdown};
+    // This one is empty when Qt is not available, which triggers a warning
+    pub use euclid::approxeq::ApproxEq;
+    #[allow(unused_imports)]
+    pub use super::native_widgets::*;
+    pub use i_slint_core::accessibility::{
+        AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
+    };
+    pub use i_slint_core::animations::{EasingCurve, animation_tick, current_tick};
+    pub use i_slint_core::api::LogicalPosition;
+    pub use i_slint_core::builtin_functions;
+    pub use i_slint_core::callbacks::Callback;
+    pub use i_slint_core::context::SlintContext;
+    pub use i_slint_core::cursor::MouseCursorInner;
+    pub use i_slint_core::data_transfer::DataTransfer;
+    pub use i_slint_core::date_time::*;
+    pub use i_slint_core::debug_info;
+    pub use i_slint_core::graphics::*;
+    pub use i_slint_core::input::{
+        FocusEvent, FocusReason, InputEventResult, KeyEvent, KeyEventResult, KeyboardModifiers,
+        Keys, MouseEvent, key_codes::Key, make_keys,
+    };
+    pub use i_slint_core::item_tree::{
+        IndexRange, ItemTree, ItemTreeRc, ItemTreeRefPin, ItemTreeVTable, ItemTreeWeak,
+        ensure_item_tree_instantiated, register_item_tree, unregister_item_tree,
+    };
+    pub use i_slint_core::item_tree::{
+        ItemTreeNode, ItemVisitorRefMut, ItemVisitorVTable, ItemWeak, TraversalOrder,
+        VisitChildrenResult, visit_item_tree, visit_item_tree_z_sorted,
+    };
+    pub use i_slint_core::items::{Transform, *};
+    pub use i_slint_core::layout::*;
+    pub use i_slint_core::lengths::{
+        LogicalLength, LogicalPoint, LogicalRect, logical_position_to_api,
+    };
+    pub use i_slint_core::macos_bring_all_windows_to_front;
+    pub use i_slint_core::menus::{Menu, MenuFromItemTree, MenuVTable};
+    pub use i_slint_core::model::*;
+    pub use i_slint_core::properties::{
+        ChangeTracker, ErasedPropertyOffset, Property, PropertyTracker, StateInfo,
+        change_tracker_init_erased, set_animated_property_binding_erased,
+        set_callback_handler_erased, set_constant_properties, set_property_binding_erased,
+        set_property_state_binding_erased, set_state_binding,
+    };
+    pub use i_slint_core::slice::Slice;
+    pub use i_slint_core::timers::{Timer, TimerMode};
+    pub use i_slint_core::translations::TranslationsBundled;
+    pub use i_slint_core::window::{
+        InputMethodRequest, WindowAdapter, WindowAdapterRc, WindowInner, WindowKind,
+    };
+    pub use i_slint_core::{Color, Coord, SharedString, SharedVector, format};
+    pub use i_slint_core::{ItemTreeVTable_static, MenuVTable_static};
+    pub use once_cell::race::OnceBox;
+    pub use once_cell::unsync::OnceCell;
+    pub use pin_weak::rc::PinWeak;
+    pub use vtable::{self, *};
+
+}

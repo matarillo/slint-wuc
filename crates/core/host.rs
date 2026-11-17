@@ -96,6 +96,25 @@ fn request_frame() {
     });
 }
 
+/// Fires due timers and change handlers, and moves the animation tick to now unless frames
+/// are ticking.
+///
+/// While frames tick, only [`WM_APP_FRAME`] moves the tick, which paces animations to the
+/// compositor clock. Moving it on every message would dirty animated properties and request
+/// another sync pass each time, and the loop would spin.
+fn update_timers() {
+    let frames_ticking =
+        FRAMES.with(|f| f.get().is_some_and(|f| f.animating.load(Ordering::Acquire)));
+    match crate::context::GLOBAL_CONTEXT.with(|ctx| ctx.get().cloned()) {
+        Some(ctx) if frames_ticking => {
+            let now = crate::animations::Instant::now(&ctx);
+            ctx.platform_context().activate_timers(now);
+            crate::properties::ChangeTracker::run_change_handlers();
+        }
+        _ => crate::platform::update_timers_and_animations(),
+    }
+}
+
 impl Platform {
     /// Sets up the calling thread as a UI thread.
     pub fn new() -> Result<Self, PlatformError> {
@@ -169,7 +188,7 @@ impl crate::platform::Platform for Platform {
     fn run_event_loop(&self) -> Result<(), PlatformError> {
         let mut msg = MSG::default();
         loop {
-            crate::platform::update_timers_and_animations();
+            update_timers();
             self.arm_timer();
             let r = unsafe { GetMessageW(&mut msg, None, 0, 0) };
             if r.0 <= 0 {
@@ -316,7 +335,7 @@ extern "system" fn message_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER_SLINT => {
-            crate::platform::update_timers_and_animations();
+            update_timers();
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
@@ -404,6 +423,11 @@ impl Win32WindowAdapter {
     /// The visuals of the window's items, as text; see [`VisualTree::dump`].
     pub fn dump_visuals(&self) -> alloc::string::String {
         self.renderer.tree.borrow().dump()
+    }
+
+    /// The number of sync passes the window ran.
+    pub fn sync_passes(&self) -> u64 {
+        self.renderer.tree.borrow().passes()
     }
 
     /// The visual the window shows: the parent of the item trees' visuals.

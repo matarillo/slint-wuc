@@ -415,6 +415,11 @@ impl VisualTree {
         }
     }
 
+    /// The number of sync passes so far, for tests.
+    pub fn passes(&self) -> u64 {
+        self.pass
+    }
+
     /// The number of live nodes, for tests.
     pub fn node_count(&self) -> usize {
         self.nodes.len()

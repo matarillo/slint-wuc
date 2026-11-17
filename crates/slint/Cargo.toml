@@ -1,0 +1,37 @@
+[package]
+name = "slint"
+description = "Slint's Rust API on the Windows.UI.Composition runtime"
+authors.workspace = true
+edition = "2024"
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[features]
+default = ["std", "compat-1-2", "accessibility", "system-tray"]
+
+# Kept so that `Cargo.toml` files written for upstream Slint resolve.
+"compat-1-18" = []
+"compat-1-2" = ["compat-1-18"]
+"compat-1-0" = ["compat-1-2"]
+std = []
+accessibility = []
+system-tray = ["i-slint-core/system-tray"]
+log = ["i-slint-core/log"]
+serde = ["i-slint-core/serde"]
+gettext = ["i-slint-core/gettext-rs"]
+
+[dependencies]
+i-slint-core = { path = "../core" }
+i-slint-common = { workspace = true }
+const-field-offset = { version = "0.2.1" }
+euclid = { workspace = true }
+once_cell = { version = "1.5", default-features = false, features = ["std"] }
+pin-weak = { version = "1.1", default-features = false }
+vtable = { workspace = true }

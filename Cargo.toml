@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 [workspace]
-members = ["crates/core", "crates/core-macros", "crates/common"]
+members = ["crates/core", "crates/core-macros", "crates/common", "crates/slint", "tests/probe"]
 # `reference/` is the read-only upstream Slint tree; `spikes/` is its own workspace.
 exclude = ["reference", "spikes"]
 resolver = "3"
