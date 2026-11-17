@@ -404,9 +404,9 @@ impl Item for Rectangle {
         self: Pin<&Self>,
         _self_rc: &ItemRc,
         visual: &mut VisualUpdateRef,
-        _size: LogicalSize,
+        size: LogicalSize,
     ) -> RenderingResult {
-        visual.fill(&self.background());
+        visual.fill(&self.background(), size);
         RenderingResult::ContinueRenderingChildren
     }
 
@@ -516,13 +516,13 @@ impl Item for BasicBorderRectangle {
     }
 
     fn update_visual(
-        self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
-    ) -> crate::items::RenderingResult {
-        // TODO(phase 2): not shown yet.
-        crate::items::RenderingResult::ContinueRenderingChildren
+        self: Pin<&Self>,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        visual.border_rect(self, size);
+        RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -644,13 +644,13 @@ impl Item for BorderRectangle {
     }
 
     fn update_visual(
-        self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
-    ) -> crate::items::RenderingResult {
-        // TODO(phase 2): not shown yet.
-        crate::items::RenderingResult::ContinueRenderingChildren
+        self: Pin<&Self>,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        visual.border_rect(self, size);
+        RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1357,10 +1357,10 @@ impl Item for WindowItem {
         self: Pin<&Self>,
         _self_rc: &ItemRc,
         visual: &mut VisualUpdateRef,
-        _size: LogicalSize,
+        size: LogicalSize,
     ) -> RenderingResult {
         // The window's own background, and that of nested windows such as dialogs.
-        visual.fill(&self.background());
+        visual.fill(&self.background(), size);
         RenderingResult::ContinueRenderingChildren
     }
 

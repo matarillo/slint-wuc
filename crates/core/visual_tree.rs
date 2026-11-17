@@ -2,14 +2,18 @@
 //!
 //! See `docs/design/visual-tree.md` for the design.
 
+mod shapes;
+
+use crate::item_rendering::{BorderRectLayout, RenderBorderRectangle};
 use crate::item_tree::{ItemTreeRc, ItemVisitorResult, ItemWeak, TraversalOrder};
 use crate::items::{ItemRc, ItemRef, RenderingResult};
-use crate::lengths::{LogicalPoint, LogicalRect};
+use crate::lengths::{LogicalPoint, LogicalRect, LogicalSize, ScaleFactor};
 use crate::properties::PropertyTracker;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::Cell;
 use core::pin::Pin;
+use shapes::ui_color;
 use std::collections::HashSet;
 use windows::UI::Composition::{
     CompositionColorBrush, Compositor, ContainerVisual, ShapeVisual, SpriteVisual,
@@ -92,23 +96,57 @@ impl VisualUpdate<'_> {
         self.ensure_kind(VisualKind::Container);
     }
 
-    /// Fills the node's area with `brush`, or shows nothing of its own if it's transparent.
-    pub fn fill(&mut self, brush: &crate::Brush) {
+    /// Fills the node's area, of `size`, with `brush`, or shows nothing of its own if `brush` is
+    /// transparent.
+    pub fn fill(&mut self, brush: &crate::Brush, size: LogicalSize) {
         if brush.is_transparent() {
             self.plain();
             return;
         }
         let sprite = self.sprite();
-        // TODO(phase 2): gradients. Until then a gradient shows as its first stop.
-        let color = ui_color(brush.color());
-        match sprite.Brush().and_then(|b| b.cast::<CompositionColorBrush>()) {
-            Ok(current) => {
-                let _ = current.SetColor(color);
-            }
-            Err(_) => {
-                let brush = self.compositor.CreateColorBrushWithColor(color).unwrap();
-                let _ = sprite.SetBrush(&brush);
-            }
+        // A color change reuses the color brush.
+        if let crate::Brush::SolidColor(color) = brush
+            && let Ok(current) = sprite.Brush().and_then(|b| b.cast::<CompositionColorBrush>())
+        {
+            let _ = current.SetColor(ui_color(*color));
+            return;
+        }
+        if let Some(b) = shapes::make_brush(self.compositor, brush, size.cast_unit()) {
+            let _ = sprite.SetBrush(&b);
+        }
+    }
+
+    /// Shows a rectangle with a border and rounded corners, of `size`, laid out like upstream's
+    /// renderers lay it out (`BorderRectLayout`): one shape fills the background, another
+    /// strokes the border. Without border or radius it's a plain [`Self::fill`].
+    pub fn border_rect(&mut self, rect: Pin<&dyn RenderBorderRectangle>, size: LogicalSize) {
+        let Some(layout) = BorderRectLayout::new(rect, size, ScaleFactor::new(1.)) else {
+            self.plain();
+            return;
+        };
+        if layout.border_width.get() <= 0. && layout.outer_radius.is_zero() {
+            self.fill(&rect.background(), size);
+            return;
+        }
+        let c = self.compositor.clone();
+        let shapes = self.shape().Shapes().unwrap();
+        let _ = shapes.Clear();
+        if let Some(brush) = shapes::make_brush(&c, &rect.background(), layout.brush_size)
+            && let Ok(geometry) =
+                shapes::rounded_rect(&c, layout.background_rect, layout.background_radius)
+        {
+            let shape = c.CreateSpriteShapeWithGeometry(&geometry).unwrap();
+            let _ = shape.SetFillBrush(&brush);
+            let _ = shapes.Append(&shape);
+        }
+        if layout.border_width.get() > 0.
+            && let Some(brush) = shapes::make_brush(&c, &layout.border_color, layout.brush_size)
+            && let Ok(geometry) = shapes::rounded_rect(&c, layout.border_rect, layout.border_radius)
+        {
+            let shape = c.CreateSpriteShapeWithGeometry(&geometry).unwrap();
+            let _ = shape.SetStrokeBrush(&brush);
+            let _ = shape.SetStrokeThickness(layout.border_width.get());
+            let _ = shapes.Append(&shape);
         }
     }
 
@@ -147,10 +185,6 @@ impl VisualUpdate<'_> {
         *self.visual = new;
         *self.kind = kind;
     }
-}
-
-fn ui_color(color: crate::Color) -> windows::UI::Color {
-    windows::UI::Color { A: color.alpha(), R: color.red(), G: color.green(), B: color.blue() }
 }
 
 static NEXT_GENERATION: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(1);
@@ -419,10 +453,12 @@ fn dump_visual(visual: &ContainerVisual, depth: usize, out: &mut alloc::string::
         indent = depth * 2
     );
     if let Ok(sprite) = visual.cast::<SpriteVisual>()
-        && let Ok(brush) = sprite.Brush().and_then(|b| b.cast::<CompositionColorBrush>())
-        && let Ok(c) = brush.Color()
+        && let Ok(brush) = sprite.Brush()
     {
-        let _ = write!(out, " #{:02x}{:02x}{:02x}{:02x}", c.R, c.G, c.B, c.A);
+        let _ = write!(out, " {}", shapes::describe_brush(&brush));
+    }
+    if let Ok(shape) = visual.cast::<ShapeVisual>() {
+        let _ = write!(out, "{}", shapes::describe_shapes(&shape));
     }
     let opacity = visual.Opacity().unwrap_or(1.0);
     if opacity != 1.0 {
@@ -541,6 +577,94 @@ mod tests {
         visuals.sync(&[(weak, LogicalPoint::default())]);
         assert_eq!(visuals.node_count(), 0);
         assert_eq!(visuals.dump(), "");
+    }
+
+    fn print(visuals: &VisualTree) -> alloc::string::String {
+        let dump = visuals.dump();
+        std::println!("{dump}");
+        dump
+    }
+
+    #[test]
+    fn border_rectangles_are_shapes_laid_out_like_upstream() {
+        use crate::lengths::LogicalLength;
+        let tree = crate::testing::BorderTree::new((100., 50.), 1);
+        let root = tree.rect(0);
+        root.background.set(red());
+        root.border_color.set(Brush::SolidColor(Color::from_rgb_u8(0, 0, 0)));
+        root.border_width.set(LogicalLength::new(2.));
+        for radius in [
+            &root.border_top_left_radius,
+            &root.border_top_right_radius,
+            &root.border_bottom_right_radius,
+            &root.border_bottom_left_radius,
+        ] {
+            radius.set(LogicalLength::new(4.));
+        }
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        // Opaque border: the fill stops under the border, both inset by half the border width.
+        assert_eq!(
+            print(&visuals),
+            "Shape 0,0 100x50 [fill #ff0000ff rrect 1,1 98x48 r3] [stroke #000000ff w2 rrect 1,1 98x48 r3]
+  Container 0,0 10x10
+"
+        );
+
+        // Different radii per corner need a path; the child stays in place.
+        root.border_top_left_radius.set(LogicalLength::new(10.));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Shape 0,0 100x50 [fill #ff0000ff path] [stroke #000000ff w2 path]
+  Container 0,0 10x10
+"
+        );
+
+        // Neither border nor radius: a plain sprite again.
+        root.border_width.set(LogicalLength::new(0.));
+        for radius in [
+            &root.border_top_left_radius,
+            &root.border_top_right_radius,
+            &root.border_bottom_right_radius,
+            &root.border_bottom_left_radius,
+        ] {
+            radius.set(LogicalLength::new(0.));
+        }
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Sprite 0,0 100x50 #ff0000ff
+  Container 0,0 10x10
+"
+        );
+    }
+
+    #[test]
+    fn gradients_map_to_native_brushes() {
+        use crate::graphics::{GradientStop, LinearGradientBrush, RadialGradientBrush};
+        let stops = || {
+            [
+                GradientStop { color: Color::from_rgb_u8(255, 0, 0), position: 0. },
+                GradientStop { color: Color::from_rgb_u8(0, 0, 255), position: 1. },
+            ]
+        };
+        let tree = RectTree::new((100., 50.), 1);
+        // 90deg runs left to right.
+        tree.rect(0).background.set(Brush::LinearGradient(LinearGradientBrush::new(90., stops())));
+        tree.rect(1)
+            .background
+            .set(Brush::RadialGradient(RadialGradientBrush::new_circle(stops())));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Sprite 0,0 100x50 linear(0,25->100,25 #ff0000ff@0 #0000ffff@1)
+  Sprite 0,0 10x10 radial(5,5 7.071068,7.071068 #ff0000ff@0 #0000ffff@1)
+"
+        );
     }
 
     #[test]

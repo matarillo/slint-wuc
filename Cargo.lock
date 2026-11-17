@@ -753,6 +753,7 @@ dependencies = [
  "unicode-segmentation",
  "vtable",
  "windows",
+ "windows-core",
  "windows-future",
  "windows-numerics",
 ]
