@@ -146,11 +146,12 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 
 ### Phase 4 — テキスト (Sonnet 中心、基盤は Opus)
 - [Opus] スパイク S4。
-- [Opus] `text/` の中核: DirectWrite による計測 (`text_size`、`font_metrics`、カーソル矩形、位置→オフセット)、フォント登録、サーフェス描画。上流の `renderer().text_*` 呼び出しの置換方針。
-- [Opus] IME 統合 (TSF か IMM32) と `InputMethodRequest` の接続。
-- [Sonnet] `items/text.rs`・`items/input_items.rs` の呼び出し箇所の置換、SimpleText / ComplexText、StyledTextItem の実装。
+- **方針の変更 (S4 の後に決定)**: レイアウトと計測は上流と同じ parley (`textlayout/sharedparley`) のまま残し、描画だけを置き換える。parley が並べたグリフを Direct2D で Composition の描画面に描く。上流の挙動 (折り返し、省略、行数制限、StyledText、選択、変換中の下線) とテストの数値がそのまま合う。アプリの挙動に不備が出たら、DirectWrite への置き換え (parley の削除) を改めて検討する。
+- [Opus] テキスト描画の中核: `GlyphRenderer` を実装する描画リストの記録と、Direct2D への再生。フォントデータから DirectWrite のフォントフェイスへの変換、カラー絵文字、縁取り、スレッドごとの描画デバイスとデバイス置き換え時の再描画。
+- [Opus] IME 統合 (IMM32。上流の winit と同じ) と `InputMethodRequest` の接続。ホスト側の IME の窓口は、将来 TSF に差し替えられる形にする。
+- [Opus] SimpleText / ComplexText / StyledTextItem / TextInput の `update_visual` の接続 (4 つとも同じ入口なので横展開せず中核と同時に実装)。
+- [Sonnet] テスト用の固定幅フォント (FixedTestFont) と `configure_test_fonts`。
 - [Sonnet] TextInput (キャレット、選択、アンドゥ)、TextInputInterface、text 系テストの移植。
-- [Sonnet] parley/fontique/swash のテキスト基盤 (`textlayout*`、`font_collection`) と、それが依存する `ItemRenderer` / `Render*` トレイトの削除 (Phase 1 では計測のために残した)。
 - **ゲート** [Opus]: 上流 `tests/cases` の text 系が通る。日本語 IME の手動チェックリストを満たす。
 
 ### Phase 5 — 画像・パス・エフェクト (Sonnet 中心、基盤は Opus)

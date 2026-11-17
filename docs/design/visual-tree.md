@@ -62,6 +62,7 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 | `Clip` | `ContainerVisual` | `InsetClip`, or `CompositionGeometricClip` with a rounded rectangle or path |
 | `Transform` | `ContainerVisual` | `TransformMatrix` |
 | `Flickable` | `ContainerVisual` | `InsetClip` to the item, as upstream's `render` clips |
+| Text items | `ContainerVisual` with a content sprite and a surface brush | the text drawn into a drawing surface; see [Text](#text) |
 
 - `Transform` builds the matrix itself: Composition's `Scale` and `RotationAngle` apply scale before rotation, and Slint rotates first.
 - `Layer`'s `cache-rendering-hint` has no equivalent; Composition retains content anyway.
@@ -69,6 +70,33 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
   scrolling changes the viewport's `x` and `y`, so only that visual's `Offset` changes.
 - When an item needs a different visual type (a radius becomes non-zero), the node creates the new visual,
   copies offset, size, opacity, clip and transform, moves the children over, and replaces it in the parent's collection.
+
+### Text
+
+Text items (`SimpleText`, `ComplexText`, `StyledTextItem`, `TextInput`) keep upstream's layout: `textlayout/sharedparley` shapes and positions the glyphs, as it does for upstream's renderers ([S4](spike-s4-text.md)).
+Only the drawing is new.
+
+- **Recording.** `update_visual` calls upstream's `sharedparley::draw_text` or `draw_text_input` with a recording `GlyphRenderer`.
+  It keeps the glyph runs, rectangles (selection, cursor, decorations) and clips as a display list, in physical pixels relative to the item.
+  Nothing touches Direct2D while parley walks the layout.
+- **Bounds.** The display list's bounds decide the surface: the union of the drawn glyphs and rectangles, padded for ink that overhangs the advances, cut by the clips in effect.
+  They aren't the item's rectangle: an elided text keeps its last line even when it overflows the item, and alignment can put lines above it.
+- **Surface.** The node stays a container and gets a content sprite: the first of its children, below the items' visuals, which children patching inserts above it.
+  The sprite shows a `CompositionDrawingSurface` of the bounds' size, rounded up to whole pixels, through a `CompositionSurfaceBrush` with `SnapToPixels`, and is offset to the bounds' origin in logical pixels.
+  A list with nothing to draw removes the sprite.
+- **Replay.** The display list is drawn into the surface with a Direct2D device context at the window's scale factor, grayscale antialiasing.
+  Glyph runs go through DirectWrite font faces made from parley's font data, without copying it: the faces are cached per font blob, face index, simulation and variation settings.
+  Color glyphs (emoji) go through `TranslateColorGlyphRun`: COLRv1 paint trees (Segoe UI Emoji on Windows 11) need `IDWriteFactory8` and `ID2D1DeviceContext7::DrawPaintGlyphRun`; COLRv0 layers, bitmaps and SVG glyphs have their own calls.
+  Strokes draw the glyph outlines; faux italic skews the run around its baseline, faux bold is DirectWrite's bold simulation.
+  The code is in `visual_tree/text.rs` (recording and replay) and `visual_tree/graphics.rs` (devices and faces).
+- **Changes.** The node's content tracker sees what parley reads, including the window's scale factor, so a change of text, style, size or scale factor redraws the surface.
+  The cursor's blinking is a property too: it redraws the text input, which costs about 25 µs (S4).
+- **Device.** One D3D11 device, its D2D device, and one `CompositionGraphicsDevice` per UI thread, shared by its windows.
+  When the device is lost or replaced, every text node is marked dirty and redraws.
+  The devices are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
+- **Cache.** The window's renderer keeps upstream's `TextLayoutCache`, which measurement and drawing share; destroyed components leave it as in upstream's renderers.
+- **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
+- **Not yet.** Conic gradients draw in their first color (Phase 5 brings them with the other surface drawing); clips with a radius clip to their rectangle; a text larger than 16384 pixels is cut off (virtual surfaces would lift that).
 
 ### Children Patching
 
@@ -104,6 +132,6 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 ## Open Questions
 
 - Whether to share one brush per color across the window (S2 measured the memory difference).
-- How items that draw into surfaces (text, images, paths) report their content size and DPI changes; settled with S4.
+- How images and paths, which also draw into surfaces, follow the text design; settled with S5.
 - `WindowInner::set_component` on a shown window keeps the old component alive until the window is hidden, as upstream does.
   Generated code only sets the component before showing.

@@ -114,7 +114,11 @@ winit doesn't answer it, so upstream can't reconvert on Windows either.
 - **One device per thread**: a D3D11 device (BGRA support), its D2D device, and one `CompositionGraphicsDevice` that every window of the thread shares.
   `RenderingDeviceReplaced` redraws every surface.
   A `BeginDraw` or `EndDraw` that fails with `DXGI_ERROR_DEVICE_REMOVED`, `DXGI_ERROR_DEVICE_RESET` or `D2DERR_RECREATE_TARGET` creates a new device and hands it to `SetRenderingDevice`, which leads to the same redraw.
-- **Measurement through `IDWriteTextLayout`**, with the system font collection and its fallback.
+- **Measurement stays with parley** (decided after the spike, superseding the next bullet).
+  Upstream's text behavior (wrapping, elision, line limits, styled text, selection, the preedit underline) lives in `textlayout/sharedparley`, and upstream's test cases expect its numbers.
+  Only drawing changes: parley's glyph runs are drawn with Direct2D into the surface of the first decision.
+  DirectWrite's measurement below stays the fallback if parley turns out wrong for applications.
+- **Measurement through `IDWriteTextLayout`** (superseded), with the system font collection and its fallback.
   The text item keeps its layout until its text, font or wrapping width changes.
   The renderer interface's calls map as follows:
   - `text_size` → `GetMetrics`.
@@ -124,6 +128,7 @@ winit doesn't answer it, so upstream can't reconvert on Windows either.
   - UTF-8 ↔ UTF-16 conversion at that boundary.
   Whether `text_size` includes trailing whitespace is left to the upstream text cases of Phase 4.
 - **IMM32 for input methods**, as winit (and so upstream on Windows) uses; the manual check passed.
+  The host keeps the input method behind one module, so TSF can replace it later for reconversion and context.
   Composition updates become Slint's composition key events (`UpdateComposition` with the preedit text and cursor, `CommitComposition` with the result).
   The `InputMethodRequest`s of the text input give the caret rectangle for `ImmSetCandidateWindow`.
   TSF stays out unless an input method needs it.
