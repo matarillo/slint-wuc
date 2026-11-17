@@ -22,4 +22,5 @@ internal = []
 
 [dependencies]
 i-slint-core = { path = "../core" }
+i-slint-common = { workspace = true, features = ["shared-fontique"] }
 vtable = { workspace = true }

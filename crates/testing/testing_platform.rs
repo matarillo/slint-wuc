@@ -153,6 +153,10 @@ impl TestingPlatform {
 impl Platform for TestingPlatform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
         let adapter = self.host.create_window_adapter()?;
+        // Only the testing platform measures `FixedTestFont` with fixed metrics.
+        host::Win32WindowAdapter::from_window(adapter.window())
+            .expect("the host created the window")
+            .enable_fixed_test_font();
         ALL_TESTING_WINDOWS.with(|list| {
             let mut list = list.borrow_mut();
             list.retain(|w| w.upgrade().is_some());

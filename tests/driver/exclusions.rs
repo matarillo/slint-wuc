@@ -16,6 +16,8 @@ const IMAGES_AND_ACCESSIBILITY: &str = concat!(
     "images (load_image_from_embedded_data), phase 5, ",
     "and accessibility (ElementHandle::accessible_role), phase 6"
 );
+const ACCESSIBILITY_VALUE: &str =
+    "accessibility (ElementHandle::accessible_value, accessible_read_only), phase 6";
 const INTERPRETER: &str = concat!(
     "slint-interpreter (the embedded component is compiled at run time), ",
     "not part of this fork, listed as a gap in phase 7"
@@ -28,14 +30,9 @@ const TESTING_BACKEND_AND_TRAY: &str = concat!(
     "TestingBackend (upstream's testing platform, for a SlintContext of its own, with open_url), ",
     "phase 7, and SystemTrayIcon and the Platform global, phase 6"
 );
-const TEST_FONTS: &str =
-    "text measured with the system font, as configure_test_fonts does nothing until phase 4";
 
 /// Cases that are generated and compiled, but ignored when running.
-pub const IGNORED: &[(&str, &str)] = &[
-    ("layout/box_layout_repeated_height_for_width_edition_1_18.slint", TEST_FONTS),
-    ("elements/flickable_text_double_click.slint", TEST_FONTS),
-];
+pub const IGNORED: &[(&str, &str)] = &[];
 
 /// Cases that aren't generated: the Slint compiler or the Rust compiler rejects them.
 pub const NOT_BUILT: &[(&str, &str)] = &[
@@ -114,4 +111,6 @@ pub const NOT_BUILT: &[(&str, &str)] = &[
     ("elements/timer_own_context.slint", TESTING_BACKEND),
     ("elements/window_actions.slint", IMAGES),
     ("elements/window_shared_adapter_context.slint", TESTING_BACKEND),
+    ("text/componentcontainer_font_size_propagation.slint", INTERPRETER),
+    ("text/textinput_keyevents.slint", ACCESSIBILITY_VALUE),
 ];

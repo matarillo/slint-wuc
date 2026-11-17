@@ -53,6 +53,7 @@ mod input;
 mod keyboard;
 #[doc(hidden)]
 pub mod pointer;
+mod test_font;
 
 const WM_APP_INVOKE: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
@@ -685,6 +686,13 @@ impl Win32WindowAdapter {
         self.window_move_requests.get()
     }
 
+    /// Measures text in the family `FixedTestFont` with fixed metrics, as upstream's testing
+    /// backend does. Applications never turn this on; the testing platform does for its windows.
+    #[doc(hidden)]
+    pub fn enable_fixed_test_font(&self) {
+        self.renderer.fixed_test_font.set(true);
+    }
+
     /// The input method requests of a detached window, since the last time a test took them.
     #[doc(hidden)]
     pub fn ime_requests_for_testing(
@@ -1118,6 +1126,8 @@ pub struct Renderer {
     window_adapter: RefCell<Option<Weak<dyn WindowAdapter>>>,
     /// Upstream's shaped-text cache, shared by measuring and drawing.
     text_layout_cache: crate::textlayout::sharedparley::TextLayoutCache,
+    /// Whether `FixedTestFont` has its fixed metrics; see `test_font.rs`.
+    fixed_test_font: Cell<bool>,
 }
 
 impl Renderer {
@@ -1126,6 +1136,7 @@ impl Renderer {
             tree: RefCell::new(tree),
             window_adapter: RefCell::new(None),
             text_layout_cache: Default::default(),
+            fixed_test_font: Cell::new(false),
         }
     }
 }
@@ -1133,6 +1144,154 @@ impl Renderer {
 impl RendererSealed for Renderer {
     fn text_layout_cache(&self) -> Option<&crate::textlayout::sharedparley::TextLayoutCache> {
         Some(&self.text_layout_cache)
+    }
+
+    // The text measurement below is the trait's default implementation, except that the
+    // family `FixedTestFont` has fixed metrics while `fixed_test_font` is set.
+
+    fn text_size(
+        &self,
+        text_item: Pin<&dyn crate::item_rendering::RenderString>,
+        item_rc: &crate::item_tree::ItemRc,
+        max_width: Option<crate::lengths::LogicalLength>,
+        text_wrap: crate::items::TextWrap,
+    ) -> crate::lengths::LogicalSize {
+        if self.fixed_test_font.get()
+            && let Some(size) = test_font::text_size(text_item, item_rc)
+        {
+            return size;
+        }
+        crate::textlayout::sharedparley::text_size(
+            self,
+            text_item,
+            item_rc,
+            max_width,
+            text_wrap,
+            self.text_layout_cache(),
+        )
+        .unwrap_or_default()
+    }
+
+    fn text_content_widths(
+        &self,
+        text_item: Pin<&dyn crate::item_rendering::RenderString>,
+        item_rc: &crate::item_tree::ItemRc,
+    ) -> Option<crate::renderer::ContentWidths> {
+        if self.fixed_test_font.get()
+            && let Some(widths) = test_font::text_content_widths(text_item, item_rc)
+        {
+            return Some(widths);
+        }
+        crate::textlayout::sharedparley::text_content_widths(
+            self,
+            text_item,
+            item_rc,
+            self.text_layout_cache(),
+        )
+    }
+
+    fn text_line_height(
+        &self,
+        font_request: crate::graphics::FontRequest,
+        line_height_factor: Option<f32>,
+    ) -> Option<crate::lengths::LogicalLength> {
+        if self.fixed_test_font.get()
+            && let Some(height) = test_font::text_line_height(&font_request, line_height_factor)
+        {
+            return Some(height);
+        }
+        let ctx = self.slint_context()?;
+        let mut font_ctx = ctx.font_context().borrow_mut();
+        crate::textlayout::sharedparley::text_line_height(
+            &mut font_ctx,
+            &font_request,
+            line_height_factor,
+        )
+    }
+
+    fn char_size(
+        &self,
+        font_request: crate::graphics::FontRequest,
+        line_height_factor: Option<f32>,
+        ch: char,
+    ) -> crate::lengths::LogicalSize {
+        if self.fixed_test_font.get()
+            && let Some(size) = test_font::char_size(&font_request, line_height_factor)
+        {
+            return size;
+        }
+        self.slint_context()
+            .and_then(|ctx| {
+                let mut font_ctx = ctx.font_context().borrow_mut();
+                crate::textlayout::sharedparley::char_size(
+                    &mut font_ctx,
+                    &font_request,
+                    line_height_factor,
+                    ch,
+                )
+            })
+            .unwrap_or_default()
+    }
+
+    fn font_metrics(
+        &self,
+        font_request: crate::graphics::FontRequest,
+    ) -> crate::items::FontMetrics {
+        if self.fixed_test_font.get()
+            && let Some(metrics) = test_font::font_metrics(&font_request)
+        {
+            return metrics;
+        }
+        self.slint_context()
+            .map(|ctx| {
+                let mut font_ctx = ctx.font_context().borrow_mut();
+                crate::textlayout::sharedparley::font_metrics(&mut font_ctx, font_request)
+            })
+            .unwrap_or_default()
+    }
+
+    fn text_input_byte_offset_for_position(
+        &self,
+        text_input: Pin<&crate::items::TextInput>,
+        item_rc: &crate::items::ItemRc,
+        pos: crate::lengths::LogicalPoint,
+    ) -> (usize, crate::items::TextCursorAffinity) {
+        if self.fixed_test_font.get()
+            && let Some(hit) =
+                test_font::text_input_byte_offset_for_position(text_input, item_rc, pos)
+        {
+            return hit;
+        }
+        crate::textlayout::sharedparley::text_input_byte_offset_for_position(
+            self,
+            text_input,
+            item_rc,
+            pos,
+            self.text_layout_cache(),
+        )
+    }
+
+    fn text_input_cursor_rect_for_byte_offset(
+        &self,
+        text_input: Pin<&crate::items::TextInput>,
+        item_rc: &crate::items::ItemRc,
+        byte_offset: usize,
+        affinity: crate::items::TextCursorAffinity,
+    ) -> crate::lengths::LogicalRect {
+        if self.fixed_test_font.get()
+            && let Some(rect) =
+                test_font::text_input_cursor_rect_for_byte_offset(text_input, item_rc, byte_offset)
+        {
+            return rect;
+        }
+        crate::textlayout::sharedparley::text_input_cursor_rect_for_byte_offset(
+            self,
+            text_input,
+            item_rc,
+            byte_offset,
+            affinity,
+            self.text_layout_cache(),
+        )
     }
 
     fn set_window_adapter(&self, window_adapter: &Rc<dyn WindowAdapter>) {

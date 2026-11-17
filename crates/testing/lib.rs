@@ -50,7 +50,59 @@ pub use i_slint_core::MotionPreference;
 
 /// Replace the font collection with embedded NotoSans fonts for deterministic test results.
 /// Must be called after initializing the testing platform (e.g. after [`init_no_event_loop()`]).
-///
-/// The runtime has no text support yet, so this does nothing until text arrives in phase 4.
 #[cfg(feature = "internal")]
-pub fn configure_test_fonts() {}
+pub fn configure_test_fonts() {
+    use i_slint_common::sharedfontique::{FALLBACK_FAMILIES, fontique};
+
+    // Listed explicitly, in the order they take in the fallback chain: NotoSans-Regular is
+    // the default upright face and comes first. The fonts are copies of upstream's
+    // `tests/screenshots/fonts`, kept here so that this crate builds without `reference/`.
+    static FONTS: &[&[u8]] = &[
+        include_bytes!("fonts/NotoSans-Regular.ttf"),
+        include_bytes!("fonts/NotoSans-Italic.ttf"),
+        include_bytes!("fonts/NotoSansSymbols2-Regular.ttf"),
+    ];
+    // Color emoji fonts, only for the cases that name them: left out of the fallback chain so
+    // they can't change any other case.
+    static NAMED_FONTS: &[&[u8]] = &[
+        include_bytes!("fonts/NotoColorEmoji-Subset.ttf"),
+        include_bytes!("fonts/TwemojiMozilla-Subset.ttf"),
+    ];
+
+    i_slint_core::with_existing_context(|ctx| {
+        let mut font_context = ctx.font_context().borrow_mut();
+        font_context.collection = fontique::Collection::new(fontique::CollectionOptions {
+            shared: true,
+            system_fonts: false,
+        });
+        font_context.source_cache = fontique::SourceCache::new_shared();
+        font_context.clear_registered_static_fonts();
+
+        let mut chain_families: Vec<fontique::FamilyId> = Vec::new();
+        for font in FONTS {
+            let fonts = font_context
+                .collection
+                .register_fonts(fontique::Blob::new(std::sync::Arc::new(*font)), None);
+            for (family_id, _) in &fonts {
+                if !chain_families.contains(family_id) {
+                    chain_families.push(*family_id);
+                }
+            }
+        }
+        for font in NAMED_FONTS {
+            font_context
+                .collection
+                .register_fonts(fontique::Blob::new(std::sync::Arc::new(*font)), None);
+        }
+        // Map the fallback generics plus monospace (used by markdown code spans) to the bundled
+        // fonts, so all generic families resolve deterministically with system fonts disabled.
+        for generic_family in
+            FALLBACK_FAMILIES.into_iter().chain([fontique::GenericFamily::Monospace])
+        {
+            font_context
+                .collection
+                .set_generic_families(generic_family, chain_families.iter().copied());
+        }
+    })
+    .expect("platform not set, initialize the testing platform first");
+}
