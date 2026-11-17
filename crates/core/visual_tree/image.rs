@@ -11,12 +11,12 @@ use super::effects::{self, Effect};
 use super::graphics::{Graphics, graphics};
 use crate::graphics::{
     FitResult, Image, ImageInner, IntRect, IntSize, SharedImageBuffer, fit, fit9slice,
-    scalable_render_size,
+    transform_max_scale, transformed_scalable_render_size,
 };
 use crate::item_rendering::RenderImage;
-use crate::item_tree::ItemRc;
+use crate::item_tree::{ItemRc, ParentItemTraversalMode};
 use crate::items::{ImageFit, ImageRendering, ImageTiling};
-use crate::lengths::{LogicalSize, PhysicalPx, ScaleFactor};
+use crate::lengths::{ItemTransform, LogicalSize, PhysicalPx, ScaleFactor};
 use crate::window::WindowInner;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -82,11 +82,20 @@ fn update(
     let target = size.cast::<f32>() * scale_factor;
     let tiling = image.tiling();
     let fits = fits(image, &source, target, scale_factor);
-    // A scalable image is rasterized at the size it's shown at; others at their own size.
+    // A scalable image is rasterized at the size it's shown at, magnified by the transforms
+    // above it as upstream's renderers do (#10903); others at their own size.
     let raster = if <&ImageInner>::from(&source).is_svg() {
         let image_fit = if tiling != Default::default() { ImageFit::Preserve } else { image.image_fit() };
-        scalable_render_size(source_size, image_fit, target, scale_factor, tiling)
-            .map(|s| svg_raster(source_size, IntSize::new(s.width, s.height)))
+        let magnification = magnification(item_rc);
+        transformed_scalable_render_size(
+            source_size,
+            image_fit,
+            size,
+            scale_factor,
+            tiling,
+            magnification,
+        )
+        .map(|s| svg_raster(source_size, IntSize::new(s.width, s.height)))
     } else {
         Some(source_size)
     };
@@ -180,6 +189,20 @@ fn update(
         sprite.SetBrush(&brush)?;
     }
     Ok(())
+}
+
+/// How much the transforms of the item's ancestors, up to its window or popup, magnify it in the
+/// direction where they magnify it the most. Reading them makes a change update the item again.
+fn magnification(item_rc: &ItemRc) -> f32 {
+    let mut transform = ItemTransform::identity();
+    let mut item = item_rc.parent_item(ParentItemTraversalMode::StopAtPopups);
+    while let Some(parent) = item {
+        if let Some(t) = parent.children_transform() {
+            transform = transform.then(&t);
+        }
+        item = parent.parent_item(ParentItemTraversalMode::StopAtPopups);
+    }
+    transform_max_scale(transform.m11, transform.m12, transform.m21, transform.m22)
 }
 
 /// The size an SVG of `source` size renders at when asked for `requested`: it keeps its aspect

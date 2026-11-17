@@ -20,7 +20,6 @@ pub const IGNORED: &[(&str, &str)] = &[
     ("basic/text_features.slint", TEXT),
     ("image/border-image-downscaled.slint", "a downscaled border image is filtered smoothly, the reference of the software renderer is nearest-neighbor (Skia has none)"),
     ("image/images-scale_factor.slint", "images and text at scale factor 3.2 are filtered differently from the reference of the software renderer (Skia has none)"),
-    ("image/svg-transform-scale.slint", "an SVG is magnified as a bitmap under transform-scale, not rasterized again, and comes out blurry"),
     ("layer/clip-radius-fractional-position.slint", "the edge of a rounded clip is aliased, and the glyphs differ from the reference of the software renderer (Skia has none)"),
     ("path/path_conic_gradient.slint", "the slanted edges of a path filled with a conic gradient, a sprite cut to the path, are antialiased lighter than Skia's"),
     ("text/color-emoji.slint", "glyph rasterization differs, and the opacity of an emoji is ignored (compared with the software renderer, Skia has none)"),

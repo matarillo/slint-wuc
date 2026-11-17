@@ -148,6 +148,8 @@ The code is in `visual_tree/image.rs`.
   Tiles start at the part's offset cut to whole pixels, as upstream's `as i32` does.
 - **Raster.** A bitmap shows at its own size.
   An SVG is rasterized at `scalable_render_size`, which keeps its aspect ratio as `tiny_skia::IntSize::scale_to` does; the brush stretches it over the requested size, as upstream's renderers do.
+  When the transforms of its ancestors magnify it, it's rasterized larger by that magnification rounded up to a power of two (`transformed_scalable_render_size`, #10903), up to 2048 pixels.
+  The image reads the ancestors' transforms through its tracker, so a change of one updates it; a surface of the same raster size is reused.
 - **Surfaces.** One `CompositionDrawingSurface` per image's pixel data, raster size, and part, shared by the items that show it.
   The pixels go in with `CopyFromMemory` into the surface's own bitmap.
   A tiled part needs a surface of its own, since the `Border` effect wraps the whole surface.
