@@ -205,7 +205,47 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
             .and_then(|s| s.cast::<windows::UI::Composition::CompositionDrawingSurface>())
             .and_then(|s| s.SizeInt32())
             .unwrap_or_default();
-        return alloc::format!("surface {}x{}", size.Width, size.Height);
+        let mut out = alloc::format!("surface {}x{}", size.Width, size.Height);
+        let m = b.TransformMatrix().unwrap_or_default();
+        if m != windows_numerics::Matrix3x2::identity() {
+            let round = |v: f32| (v * 1e4).round() / 1e4 + 0.;
+            out += &alloc::format!(
+                " m=[{} {} {} {} {} {}]",
+                round(m.M11),
+                round(m.M12),
+                round(m.M21),
+                round(m.M22),
+                round(m.M31),
+                round(m.M32)
+            );
+        }
+        if b.BitmapInterpolationMode().ok()
+            == Some(windows::UI::Composition::CompositionBitmapInterpolationMode::NearestNeighbor)
+        {
+            out += " nearest";
+        }
+        return out;
+    }
+    if let Ok(b) = brush.cast::<windows::UI::Composition::CompositionEffectBrush>() {
+        // The effect graph isn't readable back; its sources are.
+        let source = |name: &str| {
+            b.GetSourceParameter(&name.into()).ok().map(|s| describe_brush(&s))
+        };
+        let mut out = alloc::string::String::from("effect(");
+        if let Some(image) = source("image") {
+            out += &image;
+        }
+        if let Some(color) = source("color") {
+            out += &alloc::format!(" colorize {color}");
+        }
+        if let Some(backdrop) = source("backdrop") {
+            out += &backdrop;
+        }
+        out.push(')');
+        return out;
+    }
+    if brush.cast::<windows::UI::Composition::CompositionBackdropBrush>().is_ok() {
+        return "backdrop".into();
     }
     if let Ok(b) = brush.cast::<CompositionLinearGradientBrush>() {
         let (s, e) = (b.StartPoint().unwrap_or_default(), b.EndPoint().unwrap_or_default());

@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Upstream screenshot cases, rendered headless by `probe-snapshot`.
+// Inheriting instead of re-exporting keeps the generated code free of `TestCase` aliases.
+import { TestCase as ImagesCase } from "../../../reference/slint-1.19.0/tests/screenshots/cases/image/images.slint";
+import { TestCase as BorderImageCase } from "../../../reference/slint-1.19.0/tests/screenshots/cases/image/border-image.slint";
+import { TestCase as ImageRepeatColorizeCase } from "../../../reference/slint-1.19.0/tests/screenshots/cases/image/image-repeat-colorize.slint";
+import { TestCase as ImagesAlignmentCase } from "../../../reference/slint-1.19.0/tests/screenshots/cases/image/images-alignment.slint";
+import { TestCase as BackdropBlurCase } from "../../../reference/slint-1.19.0/tests/screenshots/cases/basic/backdrop-blur.slint";
+
+export component Images inherits ImagesCase { }
+export component BorderImage inherits BorderImageCase { }
+export component ImageRepeatColorize inherits ImageRepeatColorizeCase { }
+export component ImagesAlignment inherits ImagesAlignmentCase { }
+export component BackdropBlur inherits BackdropBlurCase { }

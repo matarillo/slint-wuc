@@ -4,7 +4,9 @@
 //!
 //! See `docs/design/visual-tree.md` for the design.
 
+mod effects;
 mod graphics;
+pub mod image;
 mod shapes;
 pub mod text;
 
@@ -20,8 +22,8 @@ use core::pin::Pin;
 use shapes::ui_color;
 use std::collections::HashSet;
 use windows::UI::Composition::{
-    CompositionClip, CompositionColorBrush, Compositor, ContainerVisual, InsetClip, ShapeVisual,
-    SpriteVisual,
+    CompositionClip, CompositionColorBrush, CompositionEffectBrush, Compositor, ContainerVisual,
+    InsetClip, ShapeVisual, SpriteVisual,
 };
 use windows::core::Interface;
 use windows_numerics::{Matrix4x4, Vector2, Vector3};
@@ -231,6 +233,63 @@ impl VisualUpdate<'_> {
             ..Default::default()
         };
         let _ = self.visual.SetTransformMatrix(matrix);
+    }
+
+    /// Blurs what lies beneath the node's area, of `size`, with a Gaussian blur of `sigma`
+    /// logical pixels, inside `radius`. The children aren't clipped.
+    pub fn backdrop_blur(&mut self, sigma: f32, size: LogicalSize, radius: LogicalBorderRadius) {
+        self.plain();
+        if !(sigma > 0.) {
+            self.remove_surface_sprite();
+            return;
+        }
+        let sprite = self.surface_sprite();
+        let size = size.cast::<f32>();
+        // A backdrop brush sees only what's behind its sprite. The blur picks up the backdrop up
+        // to 3σ beyond the item, as upstream's does, so the sprite reaches that far and is
+        // clipped back to the item.
+        let margin = (3. * sigma).ceil();
+        let _ = sprite.SetOffset(Vector3 { X: -margin, Y: -margin, Z: 0. });
+        let _ = sprite.SetSize(Vector2 { X: size.width + 2. * margin, Y: size.height + 2. * margin });
+        // The compositor scales the blur with the visual, and the root carries the scale factor.
+        match sprite.Brush().and_then(|b| b.cast::<CompositionEffectBrush>()) {
+            Ok(brush) => {
+                let _ = effects::set_blur(&brush, sigma);
+            }
+            Err(_) => {
+                let c = self.compositor;
+                let effect = effects::Effect::GaussianBlur {
+                    sigma,
+                    input: Box::new(effects::Effect::Source("backdrop")),
+                };
+                let brush = c.CreateBackdropBrush().and_then(|backdrop| {
+                    effects::brush(c, &effect, &[("backdrop", &backdrop.cast()?)])
+                });
+                match brush {
+                    Ok(brush) => {
+                        let _ = sprite.SetBrush(&brush);
+                    }
+                    Err(e) => crate::debug_log!("cannot blur the backdrop: {}", e.message()),
+                }
+            }
+        }
+        let radius = radius.cast::<f32>() * ScaleFactor::new(1.);
+        let clip: windows::core::Result<CompositionClip> = if radius.is_zero() {
+            self.compositor
+                .CreateInsetClipWithInsets(margin, margin, margin, margin)
+                .and_then(|c| c.cast())
+        } else {
+            shapes::rounded_rect(
+                self.compositor,
+                euclid::Rect::new(euclid::point2(margin, margin), size.cast_unit()),
+                radius,
+            )
+            .and_then(|g| self.compositor.CreateGeometricClipWithGeometry(&g))
+            .and_then(|c| c.cast())
+        };
+        if let Ok(clip) = clip {
+            let _ = sprite.SetClip(&clip);
+        }
     }
 
     /// The sprite for content drawn into a surface, below the node's children; made on first use.

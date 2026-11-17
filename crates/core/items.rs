@@ -1992,10 +1992,10 @@ impl Item for BackdropBlur {
     fn update_visual(
         self: core::pin::Pin<&Self>,
         _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 5): not shown yet.
+        visual.backdrop_blur(self.blur().get() as f32, size, self.logical_border_radius());
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 

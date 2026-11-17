@@ -28,7 +28,8 @@ serde = ["i-slint-core/serde"]
 gettext = ["i-slint-core/gettext-rs"]
 
 [dependencies]
-i-slint-core = { path = "../core" }
+# Generated code decodes the images it embeds at run time, as upstream's default backends do.
+i-slint-core = { path = "../core", features = ["image-decoders", "image-default-formats", "svg"] }
 i-slint-common = { workspace = true }
 const-field-offset = { version = "0.2.1" }
 euclid = { workspace = true }

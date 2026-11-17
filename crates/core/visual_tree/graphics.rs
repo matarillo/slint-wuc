@@ -151,6 +151,11 @@ impl Graphics {
         self.device_generation.as_ref().get();
     }
 
+    /// The device generation, without tracking it.
+    pub(crate) fn device_generation(&self) -> u64 {
+        self.device_generation.as_ref().get_untracked()
+    }
+
     fn device_replaced(&self) {
         let generation = self.device_generation.as_ref().get_untracked();
         self.device_generation.as_ref().set(generation + 1);

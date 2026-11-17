@@ -34,10 +34,17 @@ path = "src/input.rs"
 name = "probe-text"
 path = "src/text.rs"
 
+[[bin]]
+name = "probe-snapshot"
+path = "src/snapshot.rs"
+
 [dependencies]
 slint = { path = "../../crates/slint" }
 # For the visual tree dump of `--check`.
 i-slint-core = { path = "../../crates/core" }
+# For `probe-snapshot`: headless windows, test fonts, and PNG files.
+i-slint-backend-testing = { path = "../../crates/testing", features = ["internal"] }
+image = { workspace = true }
 
 [build-dependencies]
 # The compiler is out of scope for this fork: the probe uses the published one, unmodified.

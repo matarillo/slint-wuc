@@ -1324,7 +1324,7 @@ fn test_image_size_from_svg() {
 #[cfg_attr(miri, ignore)]
 fn test_image_path_of_svg() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../demos/printerdemo/ui/images/back.svg");
+        .join("../../reference/slint-1.19.0/demos/printerdemo/ui/images/back.svg");
     let image = Image::load_from_path(&path).unwrap();
     assert_eq!(image.path(), Some(path.as_path()));
 }

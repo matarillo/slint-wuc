@@ -12,6 +12,7 @@ use crate::api::{
     EventLoopError, LogicalSize, PhysicalPosition, PhysicalSize, PlatformError, Window,
     WindowPosition, WindowSize,
 };
+use crate::graphics::{Rgba8Pixel, SharedPixelBuffer};
 use crate::item_tree::ItemTreeRef;
 use crate::items::ItemRef;
 use crate::platform::{Clipboard, EventLoopProxy, WindowEvent};
@@ -53,6 +54,7 @@ mod input;
 mod keyboard;
 #[doc(hidden)]
 pub mod pointer;
+mod snapshot;
 mod test_font;
 
 const WM_APP_INVOKE: u32 = WM_APP + 1;
@@ -583,6 +585,16 @@ impl Win32WindowAdapter {
     /// The number of sync passes the window ran.
     pub fn sync_passes(&self) -> u64 {
         self.renderer.tree.borrow().passes()
+    }
+
+    /// Syncs the visuals and captures what the compositor draws for them.
+    fn take_snapshot(&self) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
+        self.sync();
+        let (compositor, root) = {
+            let tree = self.renderer.tree.borrow();
+            (tree.compositor().clone(), tree.root().clone())
+        };
+        snapshot::capture(&compositor, &root, self.target.borrow().as_ref(), self.size.get())
     }
 
     /// The visual the window shows: the parent of the item trees' visuals.
@@ -1304,6 +1316,15 @@ impl RendererSealed for Renderer {
 
     fn supports_transformations(&self) -> bool {
         true
+    }
+
+    fn take_snapshot(&self) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
+        let adapter = self
+            .window_adapter()
+            .ok_or_else(|| PlatformError::Other("the renderer has no window".into()))?;
+        Win32WindowAdapter::from_window(adapter.window())
+            .ok_or_else(|| PlatformError::Other("the window doesn't belong to this host".into()))?
+            .take_snapshot()
     }
 
     fn free_graphics_resources(

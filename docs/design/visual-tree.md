@@ -63,6 +63,8 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 | `Transform` | `ContainerVisual` | `TransformMatrix` |
 | `Flickable` | `ContainerVisual` | `InsetClip` to the item, as upstream's `render` clips |
 | Text items | `ContainerVisual` with a content sprite and a surface brush | the text drawn into a drawing surface; see [Text](#text) |
+| `ImageItem`, `ClippedImage` | `ContainerVisual` with a floor sprite, and a child sprite per part of a nine-slice image | surface brushes, through effects for tiling and colorize; see [Images](#images) |
+| `BackdropBlur` | `ContainerVisual` with a floor sprite | a blur effect over a backdrop brush; see [Images](#images) |
 
 - `Transform` builds the matrix itself: Composition's `Scale` and `RotationAngle` apply scale before rotation, and Slint rotates first.
 - `Layer`'s `cache-rendering-hint` has no equivalent; Composition retains content anyway.
@@ -97,6 +99,43 @@ Only the drawing is new.
 - **Cache.** The window's renderer keeps upstream's `TextLayoutCache`, which measurement and drawing share; destroyed components leave it as in upstream's renderers.
 - **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
 - **Not yet.** Conic gradients draw in their first color (Phase 5 brings them with the other surface drawing); clips with a radius clip to their rectangle; a text larger than 16384 pixels is cut off (virtual surfaces would lift that).
+
+### Images
+
+`ImageItem` and `ClippedImage` place the image as upstream's Skia renderer does (`draw_image_impl`), with the effects of [S5](spike-s5-effects.md).
+The code is in `visual_tree/image.rs`.
+
+- **Parts.** `fit()`, or `fit9slice()` for a nine-slice image, gives the parts to draw, in physical pixels.
+  One part shows in the node's floor sprite; the nine parts of a nine-slice image show in children of it.
+- **Placement.** Each part's sprite has a `CompositionSurfaceBrush` with `Stretch::None`, alignment ratios 0, and a transform from raster pixels to the sprite: the part's clip moved to the origin, scaled by `source_to_target`.
+  Upstream draws images from a whole-pixel origin (`pixel_align_origin`), so the floor sprite has `IsPixelSnappingEnabled`.
+  A single part's fractional offset goes into the brush transform and an inset clip, so that only the item's origin snaps.
+  The brush itself doesn't snap: `SnapToPixels` would also round the fractional offsets inside a scaled part.
+- **Raster.** A bitmap shows at its own size.
+  An SVG is rasterized at `scalable_render_size`, which keeps its aspect ratio as `tiny_skia::IntSize::scale_to` does; the brush stretches it over the requested size, as upstream's renderers do.
+- **Surfaces.** One `CompositionDrawingSurface` per image's pixel data, raster size, and part, shared by the items that show it.
+  The pixels go in with `CopyFromMemory` into the surface's own bitmap.
+  A tiled part needs a surface of its own, since the `Border` effect wraps the whole surface.
+  The cache keeps up to 64 MiB of surfaces, least recently used first out; items keep the surfaces they show either way, since composition surfaces have no weak references.
+  A replaced device re-uploads the pixels of a surface when an item shows it next.
+- **Effects.** Tiling is a `Border` effect with wrap on the tiled axes; colorize is a `Composite` effect with `SOURCE_IN`, the colorize brush as source.
+  `Border` takes a source parameter only, so the tiles are colorized after tiling.
+  That's the same for a color; a gradient spans the first tile instead of repeating with the tiles.
+  Effect factories are cached per graph (`visual_tree/effects.rs`).
+- **Rendering.** `ImageRendering::Pixelated` sets `NearestNeighbor` on the surface brush.
+- **Known differences.** The compositor rounds a negative half-pixel origin up, where Skia rounds it away from zero: an image at x = -5.5 shows one pixel right of upstream's.
+
+`BackdropBlur` shows a `GaussianBlur` effect over a `CompositionBackdropBrush` in its floor sprite.
+The blur amount is in logical pixels, since the root visual carries the scale factor.
+A backdrop brush sees only what's behind its sprite, so the sprite reaches 3σ beyond the item and an inset or rounded clip cuts it back to the item, as upstream's blur picks up content that far.
+
+### Snapshots
+
+`Window::take_snapshot()` syncs the window, moves its root visual into a container of the window's physical size, commits, and captures that container with `GraphicsCaptureItem::CreateFromVisual` ([S3](spike-s3-verification.md)).
+A hosted window's target shows the container meanwhile, so the window doesn't flash.
+The capture goes through a D3D11 device of its own, hardware or WARP, kept per thread and never released, like the drawing devices.
+The pixels come back as straight-alpha RGBA, as upstream's renderers return them.
+Capturing needs a desktop session with DWM.
 
 ### Children Patching
 
