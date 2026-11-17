@@ -91,6 +91,7 @@ Only the drawing is new.
 - **Replay.** The display list is drawn into the surface with a Direct2D device context at the window's scale factor, grayscale antialiasing.
   Glyph runs go through DirectWrite font faces made from parley's font data, without copying it: the faces are cached per font blob, face index, simulation and variation settings.
   Color glyphs (emoji) go through `TranslateColorGlyphRun`: COLRv1 paint trees (Segoe UI Emoji on Windows 11) need `IDWriteFactory8` and `ID2D1DeviceContext7::DrawPaintGlyphRun`; COLRv0 layers, bitmaps and SVG glyphs have their own calls.
+  As in upstream's renderers, a translucent text color is the opacity of a color glyph as a whole (a Direct2D layer), with the layers in the text color opaque within it, and a bitmap glyph stays upright in faux italic.
   Strokes draw the glyph outlines; faux italic skews the run around its baseline, faux bold is DirectWrite's bold simulation.
   The code is in `visual_tree/text.rs` (recording and replay) and `visual_tree/graphics.rs` (devices and faces).
 - **Changes.** The node's content tracker sees what parley reads, including the window's scale factor, so a change of text, style, size or scale factor redraws the surface.
@@ -100,7 +101,8 @@ Only the drawing is new.
   The devices are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
 - **Cache.** The window's renderer keeps upstream's `TextLayoutCache`, which measurement and drawing share; destroyed components leave it as in upstream's renderers.
 - **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
-- **Not yet.** Clips with a radius clip to their rectangle; a text larger than 16384 pixels is cut off (virtual surfaces would lift that).
+- **Clips.** Upstream's text drawing clips to rectangles only, so the recorder ignores the radius `combine_clip` takes.
+- **Not yet.** A text larger than 16384 pixels is cut off (virtual surfaces would lift that).
 
 ### Antialiasing
 
@@ -246,6 +248,9 @@ Capturing needs a desktop session with DWM.
   Their sync passes run when a test calls `sync_now`.
 - Dumps walk the real visual tree; pixel tests capture the root after `wait_commit` (`tests/fixtures`).
 - `tests/probe` runs code from the upstream compiler and dumps the tree of a real window after each step.
+- `tests/screenshots` renders upstream's screenshot cases with `take_snapshot` and compares them with references of this fork.
+  A case gets one when it's close to upstream's reference (Skia's where there is one), or when a review found the same layout and only the difference `exclusions.rs` gives (glyph rasterization, mostly).
+  `SLINT_SCREENSHOT_REPORT=1` writes each case's difference to upstream's reference, with images side by side.
 
 ## Open Questions
 

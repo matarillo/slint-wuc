@@ -108,12 +108,20 @@ fn main() -> std::io::Result<()> {
     // A path that matches no case is a typo, or a case that upstream removed.
     // With a filter, the cases that the exclusion list names may be filtered out.
     if std::env::var_os("SLINT_TEST_FILTER").is_none() {
-        for (path, _) in exclusions::IGNORED.iter().chain(exclusions::NOT_BUILT) {
+        for (path, _) in
+            exclusions::IGNORED.iter().chain(exclusions::REVIEWED).chain(exclusions::NOT_BUILT)
+        {
             assert!(
                 testcases.iter().any(|testcase| case_key(testcase) == *path),
                 "exclusions.rs names '{path}', which is not a case"
             );
         }
+    }
+    for (path, _) in exclusions::REVIEWED {
+        assert!(
+            exclusions::IGNORED.iter().chain(exclusions::NOT_BUILT).all(|(p, _)| p != path),
+            "exclusions.rs lists '{path}' as reviewed, and as excluded"
+        );
     }
 
     // Generate the per-case modules on all cores: each case runs the Slint compiler.

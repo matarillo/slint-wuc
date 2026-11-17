@@ -6,7 +6,7 @@
 #![allow(unsafe_code)]
 
 use super::VisualUpdate;
-use super::graphics::{Graphics, MAX_SURFACE_SIDE, graphics, sprite_surface};
+use super::graphics::{Graphics, MAX_SURFACE_SIDE, d2d_color, graphics, sprite_surface};
 use crate::graphics::{Brush, Color};
 use crate::item_rendering::{
     CachedRenderingData, ItemRenderer, RenderBorderRectangle, RenderImage, RenderRectangle,
@@ -28,7 +28,9 @@ use windows::UI::Composition::SpriteVisual;
 use windows::Win32::Foundation::{DWRITE_E_NOCOLOR, POINT, SIZE};
 use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT, D2D1_ROUNDED_RECT,
+    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+    D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT, D2D1_LAYER_OPTIONS1_NONE, D2D1_LAYER_PARAMETERS1,
+    D2D1_ROUNDED_RECT,
     D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Brush, ID2D1DeviceContext, ID2D1DeviceContext4,
     ID2D1DeviceContext7,
 };
@@ -512,7 +514,19 @@ unsafe fn draw_glyphs(
             Some(width) => {
                 stroke_run(dc, &face, &run, origin, &d2d_brush, width, skewed.unwrap_or(base))
             }
-            None => fill_run(graphics, dc, &run, origin, &d2d_brush),
+            None => {
+                // Upstream's renderers draw a color glyph at the text's opacity as a whole, with
+                // its layers in the text color opaque within it.
+                let translucent = match brush.brush {
+                    Brush::SolidColor(c) if c.alpha() < 255 => Some((
+                        dc.CreateSolidColorBrush(&d2d_color(c.with_alpha(1.)), None)?.cast()?,
+                        c.alpha() as f32 / 255.,
+                    )),
+                    _ => None,
+                };
+                let color = ColorGlyphs { translucent, upright: skewed.map(|_| base) };
+                fill_run(graphics, dc, &run, origin, &d2d_brush, &color)
+            }
         };
         if skewed.is_some() {
             dc.SetTransform(&base);
@@ -522,6 +536,15 @@ unsafe fn draw_glyphs(
     }
 }
 
+/// How a run's color glyphs differ from its monochrome ones.
+struct ColorGlyphs {
+    /// For a translucent text color: the opaque brush for the layers in the text color, and the
+    /// opacity of the whole glyph.
+    translucent: Option<(ID2D1Brush, f32)>,
+    /// For a faux italic, the transform without the skew: bitmap glyphs stay upright.
+    upright: Option<Matrix3x2>,
+}
+
 /// Fills a glyph run, in color where the font has color glyphs (emoji).
 unsafe fn fill_run(
     graphics: &Graphics,
@@ -529,6 +552,7 @@ unsafe fn fill_run(
     run: &DWRITE_GLYPH_RUN,
     origin: Vector2,
     brush: &ID2D1Brush,
+    color: &ColorGlyphs,
 ) -> windows::core::Result<()> {
     let formats = DWRITE_GLYPH_IMAGE_FORMATS_TRUETYPE
         | DWRITE_GLYPH_IMAGE_FORMATS_CFF
@@ -576,49 +600,85 @@ unsafe fn fill_run(
         }
     };
     let dc4: Option<ID2D1DeviceContext4> = dc.cast().ok();
-    while unsafe { enumerator.MoveNext()? }.as_bool() {
-        let color_run = unsafe { &*enumerator.GetCurrentRun()? };
-        let base = &color_run.Base;
-        let at = Vector2 { X: base.baselineOriginX, Y: base.baselineOriginY };
-        let format = color_run.glyphImageFormat;
-        let mode = color_run.measuringMode;
-        unsafe {
-            if format == DWRITE_GLYPH_IMAGE_FORMATS_PNG
-                || format == DWRITE_GLYPH_IMAGE_FORMATS_JPEG
-                || format == DWRITE_GLYPH_IMAGE_FORMATS_TIFF
-                || format == DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8
-            {
-                if let Some(dc4) = &dc4 {
-                    dc4.DrawColorBitmapGlyphRun(
-                        format,
-                        at,
-                        &base.glyphRun,
-                        mode,
-                        D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT,
-                    );
+    let brush = color.translucent.as_ref().map_or(brush, |(opaque, _)| opaque);
+    if let Some((_, opacity)) = color.translucent {
+        unsafe { dc.PushLayer(&layer(opacity), None) };
+    }
+    let result = (|| -> windows::core::Result<()> {
+        while unsafe { enumerator.MoveNext()? }.as_bool() {
+            let color_run = unsafe { &*enumerator.GetCurrentRun()? };
+            let base = &color_run.Base;
+            let at = Vector2 { X: base.baselineOriginX, Y: base.baselineOriginY };
+            let format = color_run.glyphImageFormat;
+            let mode = color_run.measuringMode;
+            unsafe {
+                if format == DWRITE_GLYPH_IMAGE_FORMATS_PNG
+                    || format == DWRITE_GLYPH_IMAGE_FORMATS_JPEG
+                    || format == DWRITE_GLYPH_IMAGE_FORMATS_TIFF
+                    || format == DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8
+                {
+                    if let Some(dc4) = &dc4 {
+                        let mut skewed = Matrix3x2::default();
+                        if let Some(upright) = &color.upright {
+                            dc.GetTransform(&mut skewed);
+                            dc.SetTransform(upright);
+                        }
+                        dc4.DrawColorBitmapGlyphRun(
+                            format,
+                            at,
+                            &base.glyphRun,
+                            mode,
+                            D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT,
+                        );
+                        if color.upright.is_some() {
+                            dc.SetTransform(&skewed);
+                        }
+                    }
+                } else if format == DWRITE_GLYPH_IMAGE_FORMATS_COLR_PAINT_TREE {
+                    if let Some(dc7) = &dc7 {
+                        dc7.DrawPaintGlyphRun(at, &base.glyphRun, brush, 0, mode);
+                    }
+                } else if format == DWRITE_GLYPH_IMAGE_FORMATS_SVG {
+                    if let Some(dc4) = &dc4 {
+                        dc4.DrawSvgGlyphRun(at, &base.glyphRun, brush, None, 0, mode);
+                    }
+                } else if format == DWRITE_GLYPH_IMAGE_FORMATS_COLR && base.paletteIndex != 0xffff {
+                    let c = base.runColor;
+                    let layer = dc.CreateSolidColorBrush(
+                        &D2D1_COLOR_F { r: c.r, g: c.g, b: c.b, a: c.a },
+                        None,
+                    )?;
+                    dc.DrawGlyphRun(at, &base.glyphRun, None, &layer, mode);
+                } else {
+                    // Monochrome glyphs, and the COLR layers in the text color.
+                    dc.DrawGlyphRun(at, &base.glyphRun, None, brush, mode);
                 }
-            } else if format == DWRITE_GLYPH_IMAGE_FORMATS_COLR_PAINT_TREE {
-                if let Some(dc7) = &dc7 {
-                    dc7.DrawPaintGlyphRun(at, &base.glyphRun, brush, 0, mode);
-                }
-            } else if format == DWRITE_GLYPH_IMAGE_FORMATS_SVG {
-                if let Some(dc4) = &dc4 {
-                    dc4.DrawSvgGlyphRun(at, &base.glyphRun, brush, None, 0, mode);
-                }
-            } else if format == DWRITE_GLYPH_IMAGE_FORMATS_COLR && base.paletteIndex != 0xffff {
-                let c = base.runColor;
-                let layer = dc.CreateSolidColorBrush(
-                    &D2D1_COLOR_F { r: c.r, g: c.g, b: c.b, a: c.a },
-                    None,
-                )?;
-                dc.DrawGlyphRun(at, &base.glyphRun, None, &layer, mode);
-            } else {
-                // Monochrome glyphs, and the COLR layers in the text color.
-                dc.DrawGlyphRun(at, &base.glyphRun, None, brush, mode);
             }
         }
+        Ok(())
+    })();
+    if color.translucent.is_some() {
+        unsafe { dc.PopLayer() };
     }
-    Ok(())
+    result
+}
+
+/// A layer that draws its content at `opacity`.
+fn layer(opacity: f32) -> D2D1_LAYER_PARAMETERS1 {
+    D2D1_LAYER_PARAMETERS1 {
+        contentBounds: D2D_RECT_F {
+            left: -f32::MAX,
+            top: -f32::MAX,
+            right: f32::MAX,
+            bottom: f32::MAX,
+        },
+        geometricMask: core::mem::ManuallyDrop::new(None),
+        maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+        maskTransform: Matrix3x2::identity(),
+        opacity,
+        opacityBrush: core::mem::ManuallyDrop::new(None),
+        layerOptions: D2D1_LAYER_OPTIONS1_NONE,
+    }
 }
 
 /// Strokes the outlines of a glyph run.
