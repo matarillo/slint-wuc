@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Text, StyledText and TextInput, drawn through parley and Direct2D.
+export component Text inherits Window {
+    width: 360px;
+    height: 330px;
+    background: #ffffff;
+
+    in property <string> greeting: "Hello, Slint テキスト Agyj 0123";
+    in property <color> ink: #202020;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        alignment: start;
+
+        Text {
+            text: root.greeting;
+            color: root.ink;
+            font-size: 14px;
+        }
+
+        Text {
+            text: "Bold italic 太字";
+            font-size: 18px;
+            font-weight: 700;
+            font-italic: true;
+            color: #1060c0;
+        }
+
+        Text {
+            text: "Gradient and stroke";
+            font-size: 24px;
+            color: @linear-gradient(90deg, #ff0000 0%, #0000ff 100%);
+            stroke: #000000;
+            stroke-width: 1px;
+        }
+
+        Text {
+            text: "Emoji: 😀🎉👍 and العربية";
+            font-size: 16px;
+        }
+
+        Text {
+            width: 200px;
+            text: "A long line that wraps within two hundred pixels and then elides";
+            wrap: word-wrap;
+            overflow: elide;
+            max-height: 40px;
+            horizontal-alignment: center;
+        }
+
+        StyledText {
+            text: @markdown("Styled *emphasis*, **strong** and `code`");
+        }
+
+        Rectangle {
+            height: 30px;
+            border-width: 1px;
+            border-color: #808080;
+
+            input := TextInput {
+                x: 4px;
+                width: parent.width - 8px;
+                vertical-alignment: center;
+                text: "Editable 日本語";
+                font-size: 14px;
+                selection-background-color: #a0c0ff;
+            }
+        }
+
+        Text {
+            text: "Opacity 0.5";
+            opacity: 0.5;
+            font-size: 14px;
+        }
+    }
+}

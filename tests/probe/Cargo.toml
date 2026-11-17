@@ -30,6 +30,10 @@ path = "src/scrolling.rs"
 name = "probe-input"
 path = "src/input.rs"
 
+[[bin]]
+name = "probe-text"
+path = "src/text.rs"
+
 [dependencies]
 slint = { path = "../../crates/slint" }
 # For the visual tree dump of `--check`.

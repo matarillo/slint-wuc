@@ -4,7 +4,9 @@
 //!
 //! See `docs/design/visual-tree.md` for the design.
 
+mod graphics;
 mod shapes;
+pub mod text;
 
 use crate::item_rendering::{BorderRectLayout, RenderBorderRectangle};
 use crate::item_tree::{ItemTreeRc, ItemVisitorResult, ItemWeak, TraversalOrder};
@@ -60,6 +62,8 @@ struct Node {
     children: Vec<usize>,
     /// Children collected during the current pass.
     next_children: Vec<usize>,
+    /// The sprite that shows the item's drawn content (text), below the children's visuals.
+    surface_sprite: Option<SpriteVisual>,
     /// The pass that last visited this node.
     pass: u64,
     /// The parent node as of that pass; `None` for the root of an item tree.
@@ -71,6 +75,7 @@ pub struct VisualUpdate<'a> {
     compositor: &'a Compositor,
     visual: &'a mut ContainerVisual,
     kind: &'a mut VisualKind,
+    surface_sprite: &'a mut Option<SpriteVisual>,
 }
 
 impl VisualUpdate<'_> {
@@ -228,6 +233,24 @@ impl VisualUpdate<'_> {
         let _ = self.visual.SetTransformMatrix(matrix);
     }
 
+    /// The sprite for content drawn into a surface, below the node's children; made on first use.
+    pub(crate) fn surface_sprite(&mut self) -> SpriteVisual {
+        if let Some(sprite) = &*self.surface_sprite {
+            return sprite.clone();
+        }
+        let sprite = self.compositor.CreateSpriteVisual().unwrap();
+        let _ = self.visual.Children().and_then(|c| c.InsertAtBottom(&sprite));
+        *self.surface_sprite = Some(sprite.clone());
+        sprite
+    }
+
+    /// Drops the sprite of drawn content, if there is one.
+    pub(crate) fn remove_surface_sprite(&mut self) {
+        if let Some(sprite) = self.surface_sprite.take() {
+            let _ = self.visual.Children().and_then(|c| c.Remove(&sprite));
+        }
+    }
+
     /// Replaces the node's visual with one of `kind`, keeping its children, geometry, and
     /// place among its siblings.
     fn ensure_kind(&mut self, kind: VisualKind) {
@@ -325,6 +348,7 @@ impl VisualTree {
             result: RenderingResult::ContinueRenderingChildren,
             children: Vec::new(),
             next_children: Vec::new(),
+            surface_sprite: None,
             pass: 0,
             parent: None,
         });
@@ -344,14 +368,21 @@ impl VisualTree {
             self.sync_tree(&tree, *origin, pass, &mut roots);
         }
         let root_visual = self.root.clone();
-        Self::patch_children(&self.nodes, &root_visual, &self.roots, &roots);
+        Self::patch_children(&self.nodes, &root_visual, None, &self.roots, &roots);
         self.roots = roots;
         let visited: Vec<usize> =
             self.nodes.iter().filter(|(_, n)| n.pass == pass).map(|(i, _)| i).collect();
         for index in visited {
             let next = core::mem::take(&mut self.nodes[index].next_children);
             let visual = self.nodes[index].visual.clone();
-            Self::patch_children(&self.nodes, &visual, &self.nodes[index].children, &next);
+            let floor = self.nodes[index].surface_sprite.clone();
+            Self::patch_children(
+                &self.nodes,
+                &visual,
+                floor.as_ref(),
+                &self.nodes[index].children,
+                &next,
+            );
             self.nodes[index].children = next;
         }
         self.release_unvisited(pass);
@@ -392,9 +423,10 @@ impl VisualTree {
                     });
                     node.geometry = Some(geometry);
                 }
-                let Node { visual, kind, content, result, .. } = node;
+                let Node { visual, kind, content, result, surface_sprite, .. } = node;
                 if content.is_dirty() || resized {
-                    let mut update = VisualUpdate { compositor: &self.compositor, visual, kind };
+                    let mut update =
+                        VisualUpdate { compositor: &self.compositor, visual, kind, surface_sprite };
                     *result = content.as_ref().evaluate(|| {
                         item.as_ref().update_visual(&item_rc, &mut update, geometry.size)
                     });
@@ -419,10 +451,12 @@ impl VisualTree {
         );
     }
 
-    /// Makes `parent`'s children match `new`, given that they currently match `old`.
+    /// Makes `parent`'s children match `new`, given that they currently match `old`. `floor` is
+    /// the parent's own content sprite, which stays below them.
     fn patch_children(
         nodes: &slab::Slab<Node>,
         parent: &ContainerVisual,
+        floor: Option<&SpriteVisual>,
         old: &[usize],
         new: &[usize],
     ) {
@@ -441,7 +475,8 @@ impl VisualTree {
         }
         // Walk the new order and (re)insert every visual that isn't already right after its
         // predecessor in the old order. InsertAtTop is linear per call, so it isn't used (S2).
-        let mut previous: Option<&ContainerVisual> = None;
+        let floor: Option<windows::UI::Composition::Visual> = floor.map(|f| f.cast().unwrap());
+        let mut previous: Option<windows::UI::Composition::Visual> = floor;
         let mut old_pos = old.iter().filter(|id| new_set.contains(id)).copied().peekable();
         for id in new {
             let visual = &nodes[*id].visual;
@@ -451,12 +486,12 @@ impl VisualTree {
                 if old_set.contains(id) {
                     let _ = children.Remove(visual);
                 }
-                match previous {
+                match &previous {
                     Some(prev) => children.InsertAbove(visual, prev).unwrap(),
                     None => children.InsertAtBottom(visual).unwrap(),
                 }
             }
-            previous = Some(visual);
+            previous = Some(visual.cast().unwrap());
         }
     }
 
@@ -1084,7 +1119,13 @@ mod tests {
         let c = compositor();
         let mut visual = c.CreateContainerVisual().unwrap();
         let mut kind = VisualKind::Container;
-        let mut update = VisualUpdate { compositor: &c, visual: &mut visual, kind: &mut kind };
+        let mut surface_sprite = None;
+        let mut update = VisualUpdate {
+            compositor: &c,
+            visual: &mut visual,
+            kind: &mut kind,
+            surface_sprite: &mut surface_sprite,
+        };
         let size = LogicalSize::new(30., 20.);
         update.transform(90., 1., 1., LogicalPoint::default());
         update.clip(size, Some((LogicalRect::from_size(size), Default::default())));

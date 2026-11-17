@@ -199,6 +199,14 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
     if let Ok(b) = brush.cast::<CompositionColorBrush>() {
         return hex(b.Color().unwrap_or_default());
     }
+    if let Ok(b) = brush.cast::<windows::UI::Composition::CompositionSurfaceBrush>() {
+        let size = b
+            .Surface()
+            .and_then(|s| s.cast::<windows::UI::Composition::CompositionDrawingSurface>())
+            .and_then(|s| s.SizeInt32())
+            .unwrap_or_default();
+        return alloc::format!("surface {}x{}", size.Width, size.Height);
+    }
     if let Ok(b) = brush.cast::<CompositionLinearGradientBrush>() {
         let (s, e) = (b.StartPoint().unwrap_or_default(), b.EndPoint().unwrap_or_default());
         return alloc::format!(

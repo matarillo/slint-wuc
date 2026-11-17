@@ -743,6 +743,8 @@ impl Win32WindowAdapter {
             return;
         };
         let inner = self.inner();
+        // Shaped text that two passes in a row didn't use may be dropped, as after a frame.
+        self.renderer.text_layout_cache.begin_frame();
         inner.sync_visuals(|trees| {
             // Read inside the redraw tracker, so a scale factor change requests a sync pass.
             tree.set_scale_factor(inner.scale_factor());
@@ -1106,15 +1108,25 @@ fn client_size(hwnd: HWND) -> PhysicalSize {
 pub struct Renderer {
     pub(crate) tree: RefCell<VisualTree>,
     window_adapter: RefCell<Option<Weak<dyn WindowAdapter>>>,
+    /// Upstream's shaped-text cache, shared by measuring and drawing.
+    text_layout_cache: crate::textlayout::sharedparley::TextLayoutCache,
 }
 
 impl Renderer {
     fn new(tree: VisualTree) -> Self {
-        Self { tree: RefCell::new(tree), window_adapter: RefCell::new(None) }
+        Self {
+            tree: RefCell::new(tree),
+            window_adapter: RefCell::new(None),
+            text_layout_cache: Default::default(),
+        }
     }
 }
 
 impl RendererSealed for Renderer {
+    fn text_layout_cache(&self) -> Option<&crate::textlayout::sharedparley::TextLayoutCache> {
+        Some(&self.text_layout_cache)
+    }
+
     fn set_window_adapter(&self, window_adapter: &Rc<dyn WindowAdapter>) {
         *self.window_adapter.borrow_mut() = Some(Rc::downgrade(window_adapter));
     }
@@ -1129,9 +1141,10 @@ impl RendererSealed for Renderer {
 
     fn free_graphics_resources(
         &self,
-        _component: ItemTreeRef,
+        component: ItemTreeRef,
         items: &mut dyn Iterator<Item = Pin<ItemRef<'_>>>,
     ) -> Result<(), PlatformError> {
+        self.text_layout_cache.component_destroyed(component);
         // During a sync pass the tree is borrowed; the pass's sweep drops the nodes of
         // destroyed items instead.
         if let Ok(mut tree) = self.tree.try_borrow_mut() {

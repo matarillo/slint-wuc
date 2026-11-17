@@ -137,11 +137,11 @@ impl Item for ComplexText {
 
     fn update_visual(
         self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        self_rc: &crate::items::ItemRc,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 4): not shown yet.
+        crate::visual_tree::text::update_text(visual, self_rc, self, size);
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 
@@ -481,11 +481,11 @@ impl Item for StyledTextItem {
 
     fn update_visual(
         self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        self_rc: &crate::items::ItemRc,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 4): not shown yet.
+        crate::visual_tree::text::update_text(visual, self_rc, self, size);
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 
@@ -874,11 +874,11 @@ impl Item for SimpleText {
 
     fn update_visual(
         self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        self_rc: &crate::items::ItemRc,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 4): not shown yet.
+        crate::visual_tree::text::update_text(visual, self_rc, self, size);
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 
@@ -1614,11 +1614,27 @@ impl Item for TextInput {
 
     fn update_visual(
         self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        self_rc: &crate::items::ItemRc,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 4): not shown yet.
+        // As upstream's `render`: the input method follows the focused text input's text.
+        // A read-only input disabled the input method when it got the focus, so it gets no
+        // updates (upstream's renderers send them; its testing backend never renders).
+        crate::properties::evaluate_no_tracking(|| {
+            let Some(window_adapter) = self_rc.window_adapter() else { return };
+            let window = crate::window::WindowInner::from_pub(window_adapter.window());
+            if self.has_focus()
+                && !self.read_only()
+                && self.text() != *window.last_ime_text.borrow()
+                && let Some(w) = window_adapter.internal(crate::InternalToken)
+            {
+                w.input_method_request(InputMethodRequest::Update(
+                    self.ime_properties(&window_adapter, self_rc),
+                ));
+            }
+        });
+        crate::visual_tree::text::update_text_input(visual, self_rc, self, size);
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 
