@@ -4,6 +4,7 @@
 //!
 //! See `docs/design/visual-tree.md` for the design.
 
+mod conic;
 mod effects;
 mod graphics;
 pub mod image;
@@ -16,7 +17,8 @@ use crate::item_rendering::{BorderRectLayout, RenderBorderRectangle};
 use crate::item_tree::{ItemTreeRc, ItemVisitorResult, ItemWeak, TraversalOrder};
 use crate::items::{ItemRc, ItemRef, RenderingResult};
 use crate::lengths::{
-    LogicalBorderRadius, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, ScaleFactor,
+    LogicalBorderRadius, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, PhysicalPx,
+    ScaleFactor,
 };
 use crate::properties::PropertyTracker;
 use alloc::boxed::Box;
@@ -26,8 +28,8 @@ use core::pin::Pin;
 use shapes::ui_color;
 use std::collections::HashSet;
 use windows::UI::Composition::{
-    CompositionBorderMode, CompositionClip, CompositionColorBrush, CompositionEffectBrush, Compositor, ContainerVisual,
-    InsetClip, ShapeVisual, SpriteVisual,
+    CompositionBorderMode, CompositionBrush, CompositionClip, CompositionColorBrush,
+    CompositionEffectBrush, Compositor, ContainerVisual, InsetClip, ShapeVisual, SpriteVisual,
 };
 use windows::core::Interface;
 use windows_numerics::{Matrix4x4, Vector2, Vector3};
@@ -90,6 +92,8 @@ struct Node {
 /// What an item's `update_visual` works with: its node's visual and the compositor.
 pub struct VisualUpdate<'a> {
     compositor: &'a Compositor,
+    /// The item, for its window; `None` in tests of a lone visual.
+    item: Option<&'a ItemRc>,
     visual: &'a mut ContainerVisual,
     kind: &'a mut VisualKind,
     floor: &'a mut Option<ContainerVisual>,
@@ -98,6 +102,18 @@ pub struct VisualUpdate<'a> {
 impl VisualUpdate<'_> {
     pub fn compositor(&self) -> &Compositor {
         self.compositor
+    }
+
+    /// The window's scale factor, 1 without a window. Reading it makes a new scale factor
+    /// update the item again.
+    pub fn scale_factor(&self) -> f32 {
+        self.item
+            .and_then(|item| item.window_adapter())
+            .map_or(1., |adapter| crate::window::WindowInner::from_pub(adapter.window()).scale_factor())
+    }
+
+    fn brush(&self, brush: &crate::Brush, size: euclid::Size2D<f32, PhysicalPx>) -> Option<CompositionBrush> {
+        shapes::make_brush(self.compositor, brush, size, || self.scale_factor())
     }
 
     pub fn kind(&self) -> VisualKind {
@@ -148,6 +164,37 @@ impl VisualUpdate<'_> {
         (shape, Vector2 { X: -area.min_x(), Y: -area.min_y() })
     }
 
+    /// Like [`Self::shape_covering`], for brushes that shapes can't show: makes the node a plain
+    /// container with an empty container below its children that covers `area`, for sprites cut
+    /// to their outlines ([`shapes::append_clipped`]). Returns that, its size, and the offset of
+    /// the node's origin in it.
+    pub fn clipped_covering(
+        &mut self,
+        area: euclid::Rect<f32, LogicalPx>,
+    ) -> (ContainerVisual, Vector2, Vector2) {
+        self.plain();
+        let reusable = |f: &&ContainerVisual| {
+            f.cast::<ShapeVisual>().is_err() && f.cast::<SpriteVisual>().is_err()
+        };
+        let floor = match self.floor.as_ref().filter(reusable) {
+            Some(floor) => floor.clone(),
+            None => {
+                self.remove_floor();
+                let floor = self.compositor.CreateContainerVisual().unwrap();
+                let _ = self.visual.Children().and_then(|c| c.InsertAtBottom(&floor));
+                *self.floor = Some(floor.clone());
+                floor
+            }
+        };
+        let _ = floor.Children().and_then(|c| c.RemoveAll());
+        // The sprites' bounds lie where nothing is drawn, as a shape visual's do.
+        let area = area.inflate(SHAPE_MARGIN, SHAPE_MARGIN);
+        let size = Vector2 { X: area.width(), Y: area.height() };
+        let _ = floor.SetOffset(Vector3 { X: area.min_x(), Y: area.min_y(), Z: 0. });
+        let _ = floor.SetSize(size);
+        (floor, size, Vector2 { X: -area.min_x(), Y: -area.min_y() })
+    }
+
     /// Makes the node a plain `ContainerVisual`, dropping any brush or shapes.
     pub fn plain(&mut self) {
         self.ensure_kind(VisualKind::Container);
@@ -168,7 +215,7 @@ impl VisualUpdate<'_> {
             let _ = current.SetColor(ui_color(*color));
             return;
         }
-        if let Some(b) = shapes::make_brush(self.compositor, brush, size.cast_unit()) {
+        if let Some(b) = self.brush(brush, size.cast_unit()) {
             let _ = sprite.SetBrush(&b);
         }
     }
@@ -187,12 +234,37 @@ impl VisualUpdate<'_> {
             return;
         }
         let c = self.compositor.clone();
-        let (visual, origin) = self.shape(size);
         // Upstream antialiases rounded rectangles, and others only when transformed.
-        let _ = visual.SetBorderMode(soft_if(!layout.outer_radius.is_zero()));
+        let border_mode = soft_if(!layout.outer_radius.is_zero());
+        let background = rect.background();
+        let has_border = layout.border_width.get() > 0.;
+        if shapes::needs_sprite(&background)
+            || (has_border && shapes::needs_sprite(&layout.border_color))
+        {
+            let (floor, area, origin) =
+                self.clipped_covering(LogicalRect::from_size(size).cast());
+            if let Some(brush) = self.brush(&background, layout.brush_size)
+                && let Ok(outline) =
+                    shapes::rounded_rect_path(layout.background_rect, layout.background_radius)
+            {
+                let _ =
+                    shapes::append_clipped(&c, &floor, &brush, outline, area, origin, border_mode);
+            }
+            if has_border
+                && let Some(brush) = self.brush(&layout.border_color, layout.brush_size)
+                && let Ok(outline) = shapes::rounded_rect_path(layout.border_rect, layout.border_radius)
+                    .and_then(|path| shapes::widen(&path, layout.border_width.get(), None))
+            {
+                let _ =
+                    shapes::append_clipped(&c, &floor, &brush, outline, area, origin, border_mode);
+            }
+            return;
+        }
+        let (visual, origin) = self.shape(size);
+        let _ = visual.SetBorderMode(border_mode);
         let shapes = visual.Shapes().unwrap();
         let _ = shapes.Clear();
-        if let Some(brush) = shapes::make_brush(&c, &rect.background(), layout.brush_size)
+        if let Some(brush) = self.brush(&rect.background(), layout.brush_size)
             && let Ok(geometry) =
                 shapes::rounded_rect(&c, layout.background_rect, layout.background_radius)
         {
@@ -202,7 +274,7 @@ impl VisualUpdate<'_> {
             let _ = shapes.Append(&shape);
         }
         if layout.border_width.get() > 0.
-            && let Some(brush) = shapes::make_brush(&c, &layout.border_color, layout.brush_size)
+            && let Some(brush) = self.brush(&layout.border_color, layout.brush_size)
             && let Ok(geometry) = shapes::rounded_rect(&c, layout.border_rect, layout.border_radius)
         {
             let shape = c.CreateSpriteShapeWithGeometry(&geometry).unwrap();
@@ -539,7 +611,13 @@ impl VisualTree {
                 let Node { visual, kind, content, result, floor, .. } = node;
                 if content.is_dirty() || resized {
                     let mut update =
-                        VisualUpdate { compositor: &self.compositor, visual, kind, floor };
+                        VisualUpdate {
+                        compositor: &self.compositor,
+                        item: Some(&item_rc),
+                        visual,
+                        kind,
+                        floor,
+                    };
                     *result = content.as_ref().evaluate(|| {
                         item.as_ref().update_visual(&item_rc, &mut update, geometry.size)
                     });
@@ -1123,6 +1201,41 @@ mod tests {
     }
 
     #[test]
+    fn conic_gradients_are_bitmaps_and_cut_to_the_shape_they_fill() {
+        use crate::graphics::{ConicGradientBrush, GradientStop};
+        use crate::lengths::LogicalLength;
+        let conic = Brush::ConicGradient(ConicGradientBrush::new(
+            0.,
+            [
+                GradientStop { color: Color::from_rgb_u8(255, 0, 0), position: 0. },
+                GradientStop { color: Color::from_rgb_u8(0, 0, 255), position: 1. },
+            ],
+        ));
+        let tree = crate::testing::BorderTree::new((100., 50.), 0);
+        let root = tree.rect(0);
+        root.background.set(conic.clone());
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        // Four bitmap pixels per pixel, as small as the item is.
+        assert_eq!(print(&visuals), "Sprite 0,0 100x50 surface 400x200 m=[0.25 0 0 0.25 0 0]\n");
+
+        // Shapes can't show it: a sprite cut to the rounded rectangle, and one to the border.
+        root.border_top_left_radius.set(LogicalLength::new(4.));
+        root.border_width.set(LogicalLength::new(2.));
+        root.border_color.set(conic);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50
+  Container -1,-1 102x52
+    Sprite 0,0 102x52 surface 400x200 m=[0.25 0 0 0.25 1 1] clip=path
+    Sprite 0,0 102x52 surface 400x200 m=[0.25 0 0 0.25 1 1] clip=path
+"
+        );
+    }
+
+    #[test]
     fn released_items_free_their_ids_for_reuse() {
         let mut visuals = new_tree();
         let a = vtable::VRc::into_dyn(RectTree::new((10., 10.), 0));
@@ -1400,6 +1513,7 @@ mod tests {
         let mut floor = None;
         let mut update = VisualUpdate {
             compositor: &c,
+            item: None,
             visual: &mut visual,
             kind: &mut kind,
             floor: &mut floor,

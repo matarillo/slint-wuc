@@ -267,12 +267,16 @@ fn with_effects(
     let color = if colorize.is_transparent() {
         None
     } else {
-        super::shapes::make_brush(compositor, colorize, raster.cast::<f32>().cast_unit())
+        // The raster is in physical pixels already.
+        super::shapes::make_brush(compositor, colorize, raster.cast::<f32>().cast_unit(), || 1.)
     };
-    if let Some(color) = &color
-        && let Ok(gradient) = color.cast::<CompositionGradientBrush>()
-    {
-        gradient.SetTransformMatrix(colorize_transform)?;
+    if let Some(color) = &color {
+        if let Ok(gradient) = color.cast::<CompositionGradientBrush>() {
+            gradient.SetTransformMatrix(colorize_transform)?;
+        } else if let Ok(conic) = color.cast::<CompositionSurfaceBrush>() {
+            // Drawn at a pixel per raster pixel, so the transform replaces an identity.
+            conic.SetTransformMatrix(colorize_transform)?;
+        }
     }
     if color.is_none() && tiling.is_none() {
         return image.cast();
@@ -468,7 +472,7 @@ fn bgra(buffer: &SharedImageBuffer, rect: IntRect) -> Option<Vec<u8>> {
 }
 
 /// Copies `w`×`h` premultiplied BGRA pixels into the surface's own bitmap (S5).
-fn upload(
+pub(super) fn upload(
     surface: &CompositionDrawingSurface,
     pixels: &[u8],
     w: u32,

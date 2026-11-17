@@ -8,22 +8,28 @@
 
 #![allow(unsafe_code)]
 
-use crate::graphics::{Brush, GradientStop, ResolvedBrush, resolve_brush};
-use alloc::vec::Vec;
+use super::graphics::MAX_SURFACE_SIDE;
+use crate::graphics::{Brush, GradientStop, ResolvedBrush, ResolvedConicGradient, resolve_brush};
 use crate::lengths::{PhysicalBorderRadius, PhysicalPx, ScaleFactor};
+use alloc::vec::Vec;
+use windows::Foundation::Size;
+use windows::Graphics::DirectX::{DirectXAlphaMode, DirectXPixelFormat};
 use windows::Graphics::IGeometrySource2D;
 use windows::UI::Composition::{
-    CompositionBrush, CompositionClip, CompositionColorGradientStopCollection,
-    CompositionGeometricClip, CompositionGeometry, CompositionMappingMode, CompositionPath,
-    CompositionRoundedRectangleGeometry, CompositionSpriteShape, Compositor, InsetClip,
+    CompositionBorderMode, CompositionBrush, CompositionClip,
+    CompositionColorGradientStopCollection, CompositionGeometricClip, CompositionGeometry,
+    CompositionGradientBrush, CompositionMappingMode, CompositionPath,
+    CompositionRoundedRectangleGeometry, CompositionSpriteShape, CompositionStretch,
+    CompositionSurfaceBrush, Compositor, ContainerVisual, InsetClip,
 };
+use windows::Win32::Foundation::E_FAIL;
 use windows::Win32::Graphics::Direct2D::Common::{
-    D2D_SIZE_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
+    D2D_SIZE_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, D2D1_FILL_MODE_WINDING,
 };
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_SMALL, D2D1_FACTORY_TYPE_SINGLE_THREADED,
     D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1CreateFactory, ID2D1Factory, ID2D1Factory1, ID2D1Geometry,
-    ID2D1GeometrySink,
+    ID2D1GeometrySink, ID2D1StrokeStyle,
 };
 use windows::Win32::System::WinRT::Graphics::Direct2D::{
     IGeometrySource2DInterop, IGeometrySource2DInterop_Impl,
@@ -40,11 +46,13 @@ fn vector(p: euclid::Point2D<f32, PhysicalPx>) -> Vector2 {
 }
 
 /// A brush that paints `brush` over a shape of `size` whose origin is the brush's origin, or
-/// `None` if `brush` is fully transparent.
+/// `None` if `brush` is fully transparent. `scale` gives the window's scale factor, which only
+/// a conic gradient reads.
 pub(super) fn make_brush(
     c: &Compositor,
     brush: &Brush,
     size: euclid::Size2D<f32, PhysicalPx>,
+    scale: impl FnOnce() -> f32,
 ) -> Option<CompositionBrush> {
     let resolved = resolve_brush(brush, size, ScaleFactor::new(1.))?;
     let result: windows::core::Result<CompositionBrush> = (|| match resolved {
@@ -65,15 +73,47 @@ pub(super) fn make_brush(
             add_stops(c, &b.ColorStops()?, &g.stops)?;
             b.cast()
         }
-        // TODO(phase 5): there is no conic gradient brush; draw it into a surface (S2).
-        // Until then it shows as its first stop.
-        ResolvedBrush::ConicGradient(g) => c
-            .CreateColorBrushWithColor(ui_color(
-                g.stops.first().map(|s| s.color).unwrap_or_default(),
-            ))?
-            .cast(),
+        ResolvedBrush::ConicGradient(g) => conic_brush(c, &g, size, scale()),
     })();
     result.ok()
+}
+
+/// How many pixels a conic gradient's bitmap has before it's drawn at less than four times the
+/// device's density.
+const CONIC_PIXEL_BUDGET: f32 = 1024. * 1024.;
+
+/// A surface brush that shows `g` over `size` from the origin, drawn at least at `scale` pixels
+/// per unit.
+fn conic_brush(
+    c: &Compositor,
+    g: &ResolvedConicGradient,
+    size: euclid::Size2D<f32, PhysicalPx>,
+    scale: f32,
+) -> windows::core::Result<CompositionBrush> {
+    let graphics = super::graphics::graphics(c).ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+    graphics.track_device();
+    // The compositor samples the bitmap between its pixels where the item lies at a fractional
+    // pixel. A denser bitmap keeps that blend narrow where colors change abruptly.
+    let area = (size.width * size.height * scale * scale).max(1.);
+    let density = (CONIC_PIXEL_BUDGET / area).sqrt().clamp(1., 4.);
+    let texel = (scale * density).min(MAX_SURFACE_SIDE / size.width.max(size.height).max(1.));
+    let pixels = |v: f32| ((v * texel).ceil() as u32).max(1);
+    let (w, h) = (pixels(size.width), pixels(size.height));
+    let surface = graphics.composition.CreateDrawingSurface(
+        Size { Width: w as f32, Height: h as f32 },
+        DirectXPixelFormat::B8G8R8A8UIntNormalized,
+        DirectXAlphaMode::Premultiplied,
+    )?;
+    if let Err(e) = super::image::upload(&surface, &super::conic::pixels(g, w, h, texel), w, h) {
+        graphics.drawing_failed(&e, "a conic gradient");
+        return Err(e);
+    }
+    let brush = c.CreateSurfaceBrushWithSurface(&surface)?;
+    brush.SetStretch(CompositionStretch::None)?;
+    brush.SetHorizontalAlignmentRatio(0.)?;
+    brush.SetVerticalAlignmentRatio(0.)?;
+    brush.SetTransformMatrix(windows_numerics::Matrix3x2::scale(1. / texel, 1. / texel))?;
+    brush.cast()
 }
 
 fn add_stops(
@@ -146,6 +186,61 @@ pub(super) fn rounded_rect(
         return g.cast();
     }
     path_geometry(c, rounded_rect_path(rect, radius)?)
+}
+
+/// Whether a sprite shape can't show `brush`: Composition shapes take color and gradient
+/// brushes, but not the surface brush of a conic gradient.
+pub(super) fn needs_sprite(brush: &Brush) -> bool {
+    matches!(brush, Brush::ConicGradient(_)) && !brush.is_transparent()
+}
+
+/// The area that `geometry` stroked `width` wide with `style` covers, as a geometry to fill.
+pub(super) fn widen(
+    geometry: &ID2D1Geometry,
+    width: f32,
+    style: Option<&ID2D1StrokeStyle>,
+) -> windows::core::Result<ID2D1Geometry> {
+    unsafe {
+        let path = d2d_factory()?.CreatePathGeometry()?;
+        let sink = path.Open()?;
+        sink.SetFillMode(D2D1_FILL_MODE_WINDING);
+        geometry.Widen(width, style, None, FLATTENING_TOLERANCE, &sink)?;
+        sink.Close()?;
+        path.cast()
+    }
+}
+
+/// How far, in logical pixels, a widened outline's straight segments may stray from its curves.
+const FLATTENING_TOLERANCE: f32 = 0.05;
+
+/// Adds a sprite of `size` above `floor`'s other children that shows `brush` cut to `outline`.
+/// Brush and outline are relative to `origin` in `floor`. This shows what a sprite shape can't
+/// (see [`needs_sprite`]).
+pub(super) fn append_clipped(
+    c: &Compositor,
+    floor: &ContainerVisual,
+    brush: &CompositionBrush,
+    outline: ID2D1Geometry,
+    size: Vector2,
+    origin: Vector2,
+    border: CompositionBorderMode,
+) -> windows::core::Result<()> {
+    let moved = |m: windows_numerics::Matrix3x2| {
+        m * windows_numerics::Matrix3x2::translation(origin.X, origin.Y)
+    };
+    if let Ok(b) = brush.cast::<CompositionGradientBrush>() {
+        b.SetTransformMatrix(moved(b.TransformMatrix()?))?;
+    } else if let Ok(b) = brush.cast::<CompositionSurfaceBrush>() {
+        b.SetTransformMatrix(moved(b.TransformMatrix()?))?;
+    }
+    let sprite = c.CreateSpriteVisual()?;
+    sprite.SetSize(size)?;
+    sprite.SetBrush(brush)?;
+    let clip = c.CreateGeometricClipWithGeometry(&path_geometry(c, outline)?)?;
+    clip.SetOffset(origin)?;
+    sprite.SetClip(&clip)?;
+    sprite.SetBorderMode(border)?;
+    floor.Children()?.InsertAtTop(&sprite)
 }
 
 /// A Direct2D geometry as a composition geometry.

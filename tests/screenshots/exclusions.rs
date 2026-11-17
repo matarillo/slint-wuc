@@ -8,7 +8,6 @@
 // difference of `color_difference` in upstream's `testing.rs`). The others are listed here, with
 // what differs.
 
-const CONIC: &str = "conic gradients draw their first color only";
 const TEXT: &str = concat!(
     "glyph rasterization differs from the reference of the software renderer ",
     "(Skia has none for text)"
@@ -17,17 +16,13 @@ const TEXT: &str = concat!(
 /// Cases that are generated and compiled, but ignored when running: they render, and the
 /// result is known to differ from the references of upstream.
 pub const IGNORED: &[(&str, &str)] = &[
-    ("basic/clip-border-radius-scaled.slint", "the edge of a rounded clip is aliased (compared with the software renderer: Skia renders the case at scale factor 1)"),
-    ("basic/conic-gradients.slint", CONIC),
-    ("basic/gradient-border-radius.slint", CONIC),
-    ("basic/gradient-borders.slint", CONIC),
-    ("basic/radial-gradient-explicit-center.slint", CONIC),
+    ("basic/clip-border-radius-scaled.slint", "the edge of a rounded clip lies about a pixel off the one of the software renderer (Skia renders the case at scale factor 1)"),
     ("basic/text_features.slint", TEXT),
     ("image/border-image-downscaled.slint", "a downscaled border image is filtered smoothly, the reference of the software renderer is nearest-neighbor (Skia has none)"),
     ("image/images-scale_factor.slint", "images and text at scale factor 3.2 are filtered differently from the reference of the software renderer (Skia has none)"),
     ("image/svg-transform-scale.slint", "an SVG is magnified as a bitmap under transform-scale, not rasterized again, and comes out blurry"),
     ("layer/clip-radius-fractional-position.slint", "the edge of a rounded clip is aliased, and the glyphs differ from the reference of the software renderer (Skia has none)"),
-    ("path/path_conic_gradient.slint", CONIC),
+    ("path/path_conic_gradient.slint", "the slanted edges of a path filled with a conic gradient, a sprite cut to the path, are antialiased lighter than Skia's"),
     ("text/color-emoji.slint", "glyph rasterization differs, and the opacity of an emoji is ignored (compared with the software renderer, Skia has none)"),
     ("text/inline-code.slint", TEXT),
     ("text/line-height-factor.slint", TEXT),

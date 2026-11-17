@@ -15,12 +15,19 @@ use lyon_path::math::Point;
 use windows::UI::Composition::{
     CompositionBorderMode, CompositionBrush, CompositionClip, CompositionGradientBrush,
     CompositionSpriteShape, CompositionStrokeCap, CompositionStrokeLineJoin,
+    CompositionSurfaceBrush,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_BEZIER_SEGMENT, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED, D2D1_FIGURE_END_OPEN,
     D2D1_FILL_MODE_ALTERNATE, D2D1_FILL_MODE_WINDING,
 };
-use windows::Win32::Graphics::Direct2D::{D2D1_QUADRATIC_BEZIER_SEGMENT, ID2D1Geometry};
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_ROUND, D2D1_CAP_STYLE_SQUARE, D2D1_DASH_STYLE_CUSTOM,
+    D2D1_DASH_STYLE_SOLID, D2D1_LINE_JOIN_BEVEL, D2D1_LINE_JOIN_MITER_OR_BEVEL,
+    D2D1_LINE_JOIN_ROUND, D2D1_QUADRATIC_BEZIER_SEGMENT, D2D1_STROKE_STYLE_PROPERTIES,
+    ID2D1Factory, ID2D1Geometry, ID2D1StrokeStyle,
+};
+use alloc::vec::Vec;
 use windows::core::Interface;
 use windows_numerics::{Matrix3x2, Vector2};
 
@@ -56,38 +63,45 @@ fn update(
     // A gradient fill spans the viewbox when there is one, scaled to the item.
     let (viewbox_width, viewbox_height) = (path.viewbox_width(), path.viewbox_height());
     let fill = if viewbox_width > 0. && viewbox_height > 0. {
+        let (sx, sy) = (size_f.width / viewbox_width, size_f.height / viewbox_height);
         let brush = shapes::make_brush(
             &compositor,
             &path.fill(),
             euclid::size2(viewbox_width, viewbox_height),
+            || visual.scale_factor() * sx.max(sy),
         );
-        if let Some(gradient) =
-            brush.as_ref().and_then(|b| b.cast::<CompositionGradientBrush>().ok())
-        {
-            gradient.SetTransformMatrix(Matrix3x2::scale(
-                size_f.width / viewbox_width,
-                size_f.height / viewbox_height,
-            ))?;
+        if let Some(brush) = &brush {
+            if let Ok(gradient) = brush.cast::<CompositionGradientBrush>() {
+                gradient.SetTransformMatrix(Matrix3x2::scale(sx, sy))?;
+            } else if let Ok(conic) = brush.cast::<CompositionSurfaceBrush>() {
+                conic.SetTransformMatrix(conic.TransformMatrix()? * Matrix3x2::scale(sx, sy))?;
+            }
         }
         brush
     } else {
-        shapes::make_brush(&compositor, &path.fill(), size_f)
+        shapes::make_brush(&compositor, &path.fill(), size_f, || visual.scale_factor())
     };
-    let stroke = shapes::make_brush(&compositor, &path.stroke(), size_f);
+    let stroke =
+        shapes::make_brush(&compositor, &path.stroke(), size_f, || visual.scale_factor());
     if fill.is_none() && stroke.is_none() {
         return Ok(false);
     }
 
     let Some(geometry) = geometry(events.iter(), path.fill_rule())? else { return Ok(false) };
     let bounds = unsafe { geometry.GetBounds(None)? };
+    let d2d = geometry.clone();
     let geometry = shapes::path_geometry(&compositor, geometry)?;
+    // In clipped mode, the shape only carries the stroke's style.
+    let clipped = shapes::needs_sprite(&path.fill()) || shapes::needs_sprite(&path.stroke());
     let shape = compositor.CreateSpriteShapeWithGeometry(&geometry)?;
-    if let Some(brush) = &fill {
+    if let Some(brush) = &fill
+        && !clipped
+    {
         shape.SetFillBrush(brush)?;
     }
     let mut reach = 0.;
     if let Some(brush) = &stroke {
-        reach = stroke_style(&shape, brush, item_rc, path)?;
+        reach = stroke_style(&shape, (!clipped).then_some(brush), item_rc, path)?;
     }
 
     // Composition cuts shapes off at the bounds of the floor: it has to cover what the path
@@ -102,18 +116,33 @@ fn update(
         );
         item.union(&drawn.to_rect())
     };
-    let (floor, origin) = visual.shape_covering(area);
-    floor.SetBorderMode(if path.anti_alias() {
-        CompositionBorderMode::Soft
-    } else {
-        CompositionBorderMode::Hard
-    })?;
-    let clip: Option<CompositionClip> = if path.clip() {
-        Some(compositor.CreateInsetClipWithInsets(origin.X, origin.Y, origin.X, origin.Y)?.cast()?)
-    } else {
-        None
+    let border_mode =
+        if path.anti_alias() { CompositionBorderMode::Soft } else { CompositionBorderMode::Hard };
+    let clip = |origin: Vector2| -> windows::core::Result<Option<CompositionClip>> {
+        if !path.clip() {
+            return Ok(None);
+        }
+        Ok(Some(compositor.CreateInsetClipWithInsets(origin.X, origin.Y, origin.X, origin.Y)?.cast()?))
     };
-    floor.SetClip(clip.as_ref())?;
+
+    if clipped {
+        let (floor, size, origin) = visual.clipped_covering(area);
+        floor.SetClip(clip(origin)?.as_ref())?;
+        let at = Vector2 { X: origin.X + offset.x, Y: origin.Y + offset.y };
+        if let Some(brush) = &fill {
+            shapes::append_clipped(&compositor, &floor, brush, d2d.clone(), size, at, border_mode)?;
+        }
+        if let Some(brush) = &stroke {
+            let style = d2d_stroke_style(path, shape.StrokeThickness()?)?;
+            let outline = shapes::widen(&d2d, shape.StrokeThickness()?, Some(&style))?;
+            shapes::append_clipped(&compositor, &floor, brush, outline, size, at, border_mode)?;
+        }
+        return Ok(true);
+    }
+
+    let (floor, origin) = visual.shape_covering(area);
+    floor.SetBorderMode(border_mode)?;
+    floor.SetClip(clip(origin)?.as_ref())?;
     // The gradients of the shape start at the fit's offset, as upstream's do.
     shape.SetOffset(Vector2 { X: origin.X + offset.x, Y: origin.Y + offset.y })?;
     let shapes = floor.Shapes()?;
@@ -122,11 +151,11 @@ fn update(
     Ok(true)
 }
 
-/// Sets the path's stroke: brush, width, caps, joins and dashes. Returns how far the stroke
-/// reaches beyond the geometry.
+/// Sets the path's stroke: brush, if there is one, width, caps, joins and dashes. Returns how
+/// far the stroke reaches beyond the geometry.
 fn stroke_style(
     shape: &CompositionSpriteShape,
-    brush: &CompositionBrush,
+    brush: Option<&CompositionBrush>,
     item_rc: &ItemRc,
     path: Pin<&Path>,
 ) -> windows::core::Result<f32> {
@@ -175,6 +204,43 @@ fn stroke_style(
     // square.
     let reach = if join == CompositionStrokeLineJoin::MiterOrBevel { miter_limit } else { 1. };
     Ok(thickness / 2. * reach.max(core::f32::consts::SQRT_2))
+}
+
+/// The path's caps, joins and dashes for Direct2D, for a stroke `thickness` wide, as
+/// [`stroke_style`] sets them on a sprite shape.
+fn d2d_stroke_style(path: Pin<&Path>, thickness: f32) -> windows::core::Result<ID2D1StrokeStyle> {
+    let cap = match path.stroke_line_cap() {
+        LineCap::Round => D2D1_CAP_STYLE_ROUND,
+        LineCap::Square => D2D1_CAP_STYLE_SQUARE,
+        _ => D2D1_CAP_STYLE_FLAT,
+    };
+    let join = match path.stroke_line_join() {
+        LineJoin::Round => D2D1_LINE_JOIN_ROUND,
+        LineJoin::Bevel => D2D1_LINE_JOIN_BEVEL,
+        _ => D2D1_LINE_JOIN_MITER_OR_BEVEL,
+    };
+    let dashes = path.stroke_dash_array();
+    // Direct2D's dashes are in stroke widths.
+    let pattern: Vec<f32> =
+        dash_pattern(&dashes).map_or(Vec::new(), |p| p.iter().map(|l| l / thickness).collect());
+    let offset = if pattern.is_empty() {
+        0.
+    } else {
+        let length: f32 = pattern.iter().sum();
+        (path.stroke_dash_offset().get() as f32 / thickness).rem_euclid(length)
+    };
+    let properties = D2D1_STROKE_STYLE_PROPERTIES {
+        startCap: cap,
+        endCap: cap,
+        dashCap: cap,
+        lineJoin: join,
+        miterLimit: path.stroke_miter_limit().max(1.),
+        dashStyle: if pattern.is_empty() { D2D1_DASH_STYLE_SOLID } else { D2D1_DASH_STYLE_CUSTOM },
+        dashOffset: offset,
+    };
+    let dashes = (!pattern.is_empty()).then_some(pattern.as_slice());
+    let factory: ID2D1Factory = shapes::d2d_factory()?.into();
+    unsafe { factory.CreateStrokeStyle(&properties, dashes) }
 }
 
 /// The lengths of a dash pattern, or `None` for a solid stroke. Skia ignores a pattern that

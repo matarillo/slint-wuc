@@ -21,9 +21,12 @@ use windows::UI::Composition::{
     CompositionSurfaceBrush, Compositor, SpriteVisual,
 };
 use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, HMODULE, SIZE};
-use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D1_GRADIENT_STOP};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D1_PIXEL_FORMAT,
+};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
+    D2D1_BITMAP_PROPERTIES1, D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2,
+    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
     D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES, ID2D1Brush, ID2D1Device, ID2D1DeviceContext,
     ID2D1Factory1, ID2D1RenderTarget,
 };
@@ -38,6 +41,7 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FONT_SIMULATIONS, DWRITE_FONT_SIMULATIONS_BOLD, DWRITE_FONT_SIMULATIONS_NONE,
     DWriteCreateFactory, IDWriteFactory7, IDWriteFontFace5, IDWriteInMemoryFontFileLoader,
 };
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{
     DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET, IDXGIDevice,
 };
@@ -350,13 +354,26 @@ pub(crate) fn d2d_brush(
                     &stops(&g.stops)?,
                 )?
                 .cast(),
-            // TODO(phase 5): conic gradients, with the other surface drawing.
-            ResolvedBrush::ConicGradient(g) => dc
-                .CreateSolidColorBrush(
-                    &d2d_color(g.stops.first().map(|s| s.color).unwrap_or_default()),
-                    None,
-                )?
-                .cast(),
+            ResolvedBrush::ConicGradient(g) => {
+                let (w, h) = (size.width.ceil().max(1.) as u32, size.height.ceil().max(1.) as u32);
+                let pixels = super::conic::pixels(&g, w, h, 1.);
+                let properties = D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    dpiX: 96.,
+                    dpiY: 96.,
+                    ..Default::default()
+                };
+                let bitmap = dc.CreateBitmap(
+                    D2D_SIZE_U { width: w, height: h },
+                    Some(pixels.as_ptr().cast()),
+                    w * 4,
+                    &properties,
+                )?;
+                dc.CreateBitmapBrush(&bitmap, None, None)?.cast()
+            }
         }
     })();
     result.ok()

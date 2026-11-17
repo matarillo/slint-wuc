@@ -57,7 +57,7 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 | --- | --- | --- |
 | `Empty`, `Layer` | `ContainerVisual` | nothing |
 | `Rectangle`, `WindowItem` | `SpriteVisual`, or a container when transparent | color brush, reused across color changes; gradient brushes with absolute mapping |
-| `BasicBorderRectangle`, `BorderRectangle` | `ContainerVisual` with a floor `ShapeVisual`; a sprite without border and radius | a fill shape and a stroke shape laid out by upstream's `BorderRectLayout`; see [Antialiasing](#antialiasing) |
+| `BasicBorderRectangle`, `BorderRectangle` | `ContainerVisual` with a floor `ShapeVisual`; a sprite without border and radius | a fill shape and a stroke shape laid out by upstream's `BorderRectLayout`, or clipped sprites for a conic gradient; see [Antialiasing](#antialiasing) and [Conic Gradients](#conic-gradients) |
 | `Opacity` | `ContainerVisual` | `Opacity`, which is group opacity on a container (S2) |
 | `Clip` | `ContainerVisual` | `InsetClip`, or `CompositionGeometricClip` with a rounded rectangle or path |
 | `Transform` | `ContainerVisual` | `TransformMatrix` |
@@ -100,7 +100,7 @@ Only the drawing is new.
   The devices are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
 - **Cache.** The window's renderer keeps upstream's `TextLayoutCache`, which measurement and drawing share; destroyed components leave it as in upstream's renderers.
 - **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
-- **Not yet.** Conic gradients draw in their first color (Phase 5 brings them with the other surface drawing); clips with a radius clip to their rectangle; a text larger than 16384 pixels is cut off (virtual surfaces would lift that).
+- **Not yet.** Clips with a radius clip to their rectangle; a text larger than 16384 pixels is cut off (virtual surfaces would lift that).
 
 ### Antialiasing
 
@@ -117,6 +117,22 @@ The compositor antialiases edges, clips and shapes only in `CompositionBorderMod
 
 Gradients interpolate straight colors in the compositor and premultiplied colors in upstream's renderers (Skia's `InPremul::Yes`).
 Between stops of different alpha, `shapes.rs` adds seven intermediate stops that follow the premultiplied blend, and gives a transparent stop the color of its neighbor on each side.
+
+### Conic Gradients
+
+Neither Composition nor Direct2D has a conic gradient brush.
+`visual_tree/conic.rs` computes the gradient on the CPU: each bitmap pixel takes the color at its center, interpolated premultiplied as Skia's sweep gradient does.
+
+- **Composition.** The bitmap goes into a drawing surface behind a `CompositionSurfaceBrush` with `Stretch::None` and a transform that scales it to the item.
+  It covers the item only: a stroke that reaches outside the item has no gradient there.
+- **Density.** Where the item lies at a fractional pixel, the compositor samples the bitmap between its pixels, which blurs abrupt color changes such as the seam at 12 o'clock.
+  The bitmap has up to four pixels per device pixel, within a budget of 2^20 pixels, so that the blur stays a fraction of a pixel wide.
+  It's drawn at the window's scale factor, which `make_brush` reads only for a conic gradient, so that other brushes don't redraw when it changes.
+- **Shapes.** A sprite shape rejects a surface brush ("Unsupported source brush type").
+  A rounded rectangle or a path with a conic fill or stroke shows each part as a sprite with a `CompositionGeometricClip` of the part's outline, in a floor container with the shape visual's margin.
+  A stroke's outline is its geometry widened by Direct2D, with the path's caps, joins and dashes (Direct2D's dashes are in stroke widths).
+  The compositor antialiases these clips about a tenth lighter than Skia antialiases a path.
+- **Direct2D.** Text and shadows paint a conic gradient with a bitmap brush over the same pixels, at one pixel per device pixel.
 
 ### Images
 
@@ -169,8 +185,7 @@ The code is in `visual_tree/path.rs`.
   The floor covers the item and what the path draws outside it: the geometry's bounds grown by the reach of the stroke, which is the miter limit in half widths, or the corner of a square cap.
   With `clip: true` it covers the item only, with an `InsetClip` at the item's edges.
   The compiler lowers `clip` on a `Rectangle` to a `Clip` element, but keeps it as a property of `Path`, whose `render` clips to the item's rectangle.
-- **Known differences.** A conic gradient fill draws its first color, as elsewhere.
-  Edge coverage differs from Skia's by a few levels, and rounded joins and caps by a pixel at their curves.
+- **Known differences.** Edge coverage differs from Skia's by a few levels, and rounded joins and caps by a pixel at their curves.
 
 ### Shadows
 
