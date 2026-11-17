@@ -2362,6 +2362,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-fork-screenshots"
+version = "0.0.0"
+dependencies = [
+ "i-slint-backend-testing",
+ "i-slint-compiler",
+ "i-slint-core",
+ "image",
+ "rayon",
+ "slint",
+ "spin_on",
+ "test_driver_lib",
+]
+
+[[package]]
 name = "slint-fork-test-driver"
 version = "1.19.0"
 dependencies = [

@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "slint-fork-screenshots"
+description = "Renders the screenshot cases of upstream Slint on this runtime and compares them with references"
+authors.workspace = true
+# Keep an older edition to ensure the generated code is compatible with users that don't use the latest edition
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+rust-version.workspace = true
+version = "0.0.0"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+slint = { path = "../../crates/slint", features = ["std", "compat-1-2"] }
+i-slint-backend-testing = { path = "../../crates/testing", features = ["internal"] }
+i-slint-core = { path = "../../crates/core" }
+image = { workspace = true }
+
+[build-dependencies]
+# The compiler is out of scope for this fork: the screenshots use the published one, unmodified.
+i-slint-compiler = { version = "=1.19.0", features = ["default", "rust", "display-diagnostics"] }
+
+rayon = "1"
+spin_on = "0.1"
+test_driver_lib = { path = "../driverlib" }
