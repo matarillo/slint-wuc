@@ -11,7 +11,8 @@ use std::path::{Path, PathBuf};
 mod exclusions;
 
 /// The folders of the upstream cases that this driver runs, one test binary each.
-const CASE_FOLDERS: &[&str] = &["properties", "layout", "models", "conditional", "input", "focus"];
+const CASE_FOLDERS: &[&str] =
+    &["properties", "layout", "models", "conditional", "input", "focus", "elements"];
 
 /// The upstream cases are read in place, not copied.
 fn case_root() -> PathBuf {

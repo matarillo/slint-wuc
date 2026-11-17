@@ -38,6 +38,16 @@ pub fn mock_elapsed_time(duration: std::time::Duration) {
     testing_platform::mock_elapsed_time(duration.as_millis() as _);
 }
 
+/// Set the operating system's reduced-motion setting, as a platform backend would when it
+/// changes. While [`MotionPreference::Reduced`], animations that start go straight to their target.
+/// Must be called after initializing the testing platform (e.g. after [`init_no_event_loop()`]).
+pub fn set_motion_preference(preference: MotionPreference) {
+    i_slint_core::context::with_existing_context(|ctx| ctx.set_motion_preference(preference))
+        .expect("the testing platform must be initialized first");
+}
+
+pub use i_slint_core::MotionPreference;
+
 /// Replace the font collection with embedded NotoSans fonts for deterministic test results.
 /// Must be called after initializing the testing platform (e.g. after [`init_no_event_loop()`]).
 ///

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 use i_slint_core::host;
-use i_slint_core::platform::{Platform, PlatformError};
+use i_slint_core::platform::{Clipboard, Platform, PlatformError};
 use i_slint_core::window::{WindowAdapter, WindowInner};
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -122,6 +122,10 @@ pub fn get_mocked_time() -> u64 {
 pub struct TestingPlatform {
     host: host::Platform,
     mock_time: bool,
+    /// The clipboards are in memory, as upstream's testing backend keeps them, so that a test
+    /// neither touches the system clipboard nor shares it with the tests running in parallel.
+    clipboard: RefCell<Option<String>>,
+    selection_clipboard: RefCell<Option<String>>,
 }
 
 impl TestingPlatform {
@@ -129,7 +133,20 @@ impl TestingPlatform {
     ///
     /// With `mock_time`, the animation clock only moves with [`mock_elapsed_time()`].
     pub fn new(mock_time: bool) -> Result<Self, PlatformError> {
-        Ok(Self { host: host::Platform::new_headless()?, mock_time })
+        Ok(Self {
+            host: host::Platform::new_headless()?,
+            mock_time,
+            clipboard: Default::default(),
+            selection_clipboard: Default::default(),
+        })
+    }
+
+    fn clipboard_slot(&self, clipboard: Clipboard) -> Option<&RefCell<Option<String>>> {
+        match clipboard {
+            Clipboard::DefaultClipboard => Some(&self.clipboard),
+            Clipboard::SelectionClipboard => Some(&self.selection_clipboard),
+            _ => None,
+        }
     }
 }
 
@@ -163,6 +180,16 @@ impl Platform for TestingPlatform {
 
     fn cursor_flash_cycle(&self) -> Duration {
         self.host.cursor_flash_cycle()
+    }
+
+    fn set_clipboard_text(&self, text: &str, clipboard: Clipboard) {
+        if let Some(slot) = self.clipboard_slot(clipboard) {
+            *slot.borrow_mut() = Some(text.into());
+        }
+    }
+
+    fn clipboard_text(&self, clipboard: Clipboard) -> Option<String> {
+        self.clipboard_slot(clipboard)?.borrow().clone()
     }
 
     fn debug_log(&self, arguments: core::fmt::Arguments) {
