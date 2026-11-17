@@ -55,6 +55,8 @@ pub struct Platform {
     compositor: Compositor,
     /// Message-only window that receives cross-thread requests, timers, and frame ticks.
     message_window: HWND,
+    /// Creates detached windows (see [`Win32WindowAdapter`]) instead of HWNDs.
+    headless: bool,
 }
 
 /// Frame requests shared between the UI thread and its frame thread.
@@ -97,6 +99,15 @@ fn request_frame() {
 impl Platform {
     /// Sets up the calling thread as a UI thread.
     pub fn new() -> Result<Self, PlatformError> {
+        Self::with_mode(false)
+    }
+
+    /// A platform whose windows are detached, for tests.
+    pub fn new_headless() -> Result<Self, PlatformError> {
+        Self::with_mode(true)
+    }
+
+    fn with_mode(headless: bool) -> Result<Self, PlatformError> {
         let err = |e: windows::core::Error| PlatformError::Other(e.message());
         unsafe {
             let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -114,21 +125,21 @@ impl Platform {
         .ok();
         let compositor = Compositor::new().map_err(err)?;
         let message_window = create_message_window().map_err(err)?;
-        let frames = FRAMES.with(|f| -> Result<_, PlatformError> {
-            if let Some(frames) = f.get() {
-                return Ok(frames.clone());
+        // One frame thread per UI thread, posting to the first platform's message window.
+        FRAMES.with(|f| -> Result<_, PlatformError> {
+            if f.get().is_none() {
+                let wake = unsafe { CreateEventW(None, false, false, None) }.map_err(err)?;
+                let frames = Arc::new(Frames {
+                    animating: AtomicBool::new(false),
+                    pending: AtomicBool::new(false),
+                    wake,
+                });
+                let _ = f.set(frames.clone());
+                spawn_frame_thread(frames, message_window);
             }
-            let wake = unsafe { CreateEventW(None, false, false, None) }.map_err(err)?;
-            let frames = Arc::new(Frames {
-                animating: AtomicBool::new(false),
-                pending: AtomicBool::new(false),
-                wake,
-            });
-            let _ = f.set(frames.clone());
-            Ok(frames)
+            Ok(())
         })?;
-        spawn_frame_thread(frames, message_window);
-        Ok(Self { start: Instant::now(), _queue: queue, compositor, message_window })
+        Ok(Self { start: Instant::now(), _queue: queue, compositor, message_window, headless })
     }
 
     pub fn compositor(&self) -> &Compositor {
@@ -152,7 +163,7 @@ impl Platform {
 
 impl crate::platform::Platform for Platform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-        Ok(Win32WindowAdapter::new(&self.compositor)?)
+        Ok(Win32WindowAdapter::with_mode(&self.compositor, self.headless)?)
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
@@ -333,9 +344,13 @@ fn spawn_frame_thread(frames: Arc<Frames>, message_window: HWND) {
 }
 
 /// A top-level window: an HWND whose composition target shows the window's [`VisualTree`].
+///
+/// A *detached* window has no HWND: its visual tree hangs nowhere, its scale factor stays at
+/// what tests dispatch, and sync passes run when the test calls [`Self::sync_now`] (S3).
 pub struct Win32WindowAdapter {
     window: Window,
     self_weak: Weak<Self>,
+    detached: bool,
     hwnd: Cell<Option<HWND>>,
     target: RefCell<Option<DesktopWindowTarget>>,
     renderer: Renderer,
@@ -346,12 +361,22 @@ pub struct Win32WindowAdapter {
 
 impl Win32WindowAdapter {
     pub fn new(compositor: &Compositor) -> Result<Rc<Self>, PlatformError> {
+        Self::with_mode(compositor, false)
+    }
+
+    /// A window without an HWND, for tests.
+    pub fn new_detached(compositor: &Compositor) -> Result<Rc<Self>, PlatformError> {
+        Self::with_mode(compositor, true)
+    }
+
+    fn with_mode(compositor: &Compositor, detached: bool) -> Result<Rc<Self>, PlatformError> {
         let root =
             compositor.CreateContainerVisual().map_err(|e| PlatformError::Other(e.message()))?;
         let tree = VisualTree::new(compositor.clone(), root);
         Ok(Rc::new_cyclic(|weak: &Weak<Self>| Self {
             window: Window::new(weak.clone() as Weak<dyn WindowAdapter>),
             self_weak: weak.clone(),
+            detached,
             hwnd: Cell::new(None),
             target: RefCell::new(None),
             renderer: Renderer::new(tree),
@@ -359,6 +384,31 @@ impl Win32WindowAdapter {
             sync_pending: Cell::new(false),
             visible: Cell::new(false),
         }))
+    }
+
+    /// The adapter behind `window`, if this host created it.
+    pub fn from_window(window: &Window) -> Option<Rc<Self>> {
+        let adapter = WindowInner::from_pub(window).window_adapter();
+        let internal = adapter.internal(crate::InternalToken)?;
+        let this = (internal as &dyn core::any::Any).downcast_ref::<Self>()?;
+        this.self_weak.upgrade()
+    }
+
+    /// Runs a sync pass now if one is pending. Detached windows only sync through this.
+    pub fn sync_now(&self) {
+        if self.sync_pending.get() {
+            self.sync();
+        }
+    }
+
+    /// The visuals of the window's items, as text; see [`VisualTree::dump`].
+    pub fn dump_visuals(&self) -> alloc::string::String {
+        self.renderer.tree.borrow().dump()
+    }
+
+    /// The visual the window shows: the parent of the item trees' visuals.
+    pub fn root_visual(&self) -> windows::UI::Composition::ContainerVisual {
+        self.renderer.tree.borrow().root().clone()
     }
 
     fn inner(&self) -> &WindowInner {
@@ -465,11 +515,13 @@ impl WindowAdapter for Win32WindowAdapter {
         if visible == self.visible.get() {
             return Ok(());
         }
-        let hwnd = self.ensure_hwnd()?;
-        self.visible.set(visible);
-        unsafe {
-            let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+        if !self.detached {
+            let hwnd = self.ensure_hwnd()?;
+            unsafe {
+                let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+            }
         }
+        self.visible.set(visible);
         if visible {
             self.sync();
         }
@@ -501,7 +553,8 @@ impl WindowAdapter for Win32WindowAdapter {
     fn set_size(&self, size: WindowSize) {
         let size = size.to_physical(self.window.scale_factor());
         let Some(hwnd) = self.hwnd.get() else {
-            self.size.set(size);
+            // Without an HWND there is no WM_SIZE to wait for.
+            self.resized(size);
             return;
         };
         unsafe {
@@ -532,8 +585,10 @@ impl WindowAdapter for Win32WindowAdapter {
     }
 
     fn request_redraw(&self) {
-        let Some(hwnd) = self.hwnd.get() else { return };
-        if !self.sync_pending.replace(true) {
+        // Showing the window syncs; until then (and for detached windows) only remember it.
+        if !self.sync_pending.replace(true)
+            && let Some(hwnd) = self.hwnd.get()
+        {
             unsafe {
                 let _ = PostMessageW(Some(hwnd), WM_APP_SYNC, WPARAM(0), LPARAM(0));
             }
@@ -671,5 +726,71 @@ impl RendererSealed for Renderer {
 
     fn resize(&self, _size: PhysicalSize) -> Result<(), PlatformError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphics::{Brush, Color};
+    use crate::testing::RectTree;
+
+    #[test]
+    fn a_detached_window_syncs_its_component() {
+        let ctx = crate::SlintContext::new(Box::new(Platform::new_headless().unwrap()));
+        let adapter = ctx.create_window_adapter().unwrap();
+        let tree = RectTree::new((100., 50.), 1);
+        tree.rect(0).background.set(Brush::SolidColor(Color::from_rgb_u8(255, 0, 0)));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        WindowInner::from_pub(adapter.window()).set_component(&dyn_tree);
+        adapter.window().show().unwrap();
+
+        let host = Win32WindowAdapter::from_window(adapter.window()).unwrap();
+        assert_eq!(host.dump_visuals(), "Sprite 0,0 100x50 #ff0000ff\n  Container 0,0 10x10\n");
+
+        tree.rect(1).background.set(Brush::SolidColor(Color::from_rgb_u8(0, 0, 255)));
+        host.sync_now();
+        assert_eq!(
+            host.dump_visuals(),
+            "Sprite 0,0 100x50 #ff0000ff\n  Sprite 0,0 10x10 #0000ffff\n"
+        );
+
+        // Nothing changed, nothing pending.
+        host.sync_now();
+        assert!(!host.sync_pending.get());
+    }
+
+    #[test]
+    #[ignore = "opens a window on the desktop"]
+    fn a_window_follows_changes_while_the_event_loop_runs() {
+        // As the facade will: this also installs the process-wide event loop proxy.
+        crate::platform::set_platform(Box::new(Platform::new().unwrap())).unwrap();
+        let ctx = crate::SlintContext::current().unwrap();
+        let adapter = ctx.create_window_adapter().unwrap();
+        let tree = RectTree::new((100., 50.), 1);
+        tree.rect(0).background.set(Brush::SolidColor(Color::from_rgb_u8(255, 0, 0)));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        WindowInner::from_pub(adapter.window()).set_component(&dyn_tree);
+        adapter.window().show().unwrap();
+        let host = Win32WindowAdapter::from_window(adapter.window()).unwrap();
+        assert!(host.hwnd.get().is_some());
+
+        let tree_ = tree.clone();
+        ctx.single_shot(Duration::from_millis(300), move || {
+            tree_.rect(1).background.set(Brush::SolidColor(Color::from_rgb_u8(0, 0, 255)));
+        });
+        ctx.single_shot(Duration::from_millis(600), || {
+            crate::api::quit_event_loop().unwrap();
+        });
+        ctx.run_event_loop().unwrap();
+
+        assert_eq!(
+            host.dump_visuals(),
+            "Sprite 0,0 100x50 #ff0000ff
+  Sprite 0,0 10x10 #0000ffff
+"
+        );
+        let dpi = unsafe { GetDpiForWindow(host.hwnd.get().unwrap()) } as f32;
+        assert_eq!(host.root_visual().Scale().unwrap().X, dpi / 96.);
     }
 }
