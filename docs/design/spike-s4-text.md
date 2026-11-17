@@ -87,7 +87,16 @@ The window takes text through IMM32, the way winit does:
   It doesn't pass the message to `DefWindowProc`, so no `WM_IME_CHAR` follows.
 - `ImmSetCandidateWindow` with `CFS_EXCLUDE` and the caret rectangle places the candidate list below the caret.
 
-Result: pending the manual check with the Japanese IME.
+Result, with the Microsoft Japanese IME:
+
+- The composition shows inline and underlined, with no window of the system's.
+- The candidate list opens below the caret and doesn't cover the composition.
+- Committed text stays, and Backspace deletes it.
+- Moving between clauses moves the caret and the candidate list with it.
+
+Reconverting text that was already committed wasn't tried.
+It needs `WM_IME_REQUEST` with `IMR_RECONVERTSTRING`, which hands the input method the text around the caret.
+winit doesn't answer it, so upstream can't reconvert on Windows either.
 
 ## Decisions
 
@@ -114,13 +123,14 @@ Result: pending the manual check with the Japanese IME.
   - `text_input_byte_offset_for_position` → `HitTestPoint`.
   - UTF-8 ↔ UTF-16 conversion at that boundary.
   Whether `text_size` includes trailing whitespace is left to the upstream text cases of Phase 4.
-- **IMM32 for input methods**, as winit (and so upstream on Windows) uses, unless the manual check fails.
+- **IMM32 for input methods**, as winit (and so upstream on Windows) uses; the manual check passed.
   Composition updates become Slint's composition key events (`UpdateComposition` with the preedit text and cursor, `CommitComposition` with the result).
   The `InputMethodRequest`s of the text input give the caret rectangle for `ImmSetCandidateWindow`.
   TSF stays out unless an input method needs it.
 
 ## Open Items
 
+- Reconversion (`IMR_RECONVERTSTRING`), which upstream lacks; a candidate for after Phase 4, since the text input knows the text around the caret.
 - The first-capture difference at scale 1.5 in T1.
 - A real device loss (not a replacement) wasn't simulated.
   The recovery path above is the documented one; Phase 4 tests it by replacing the device.
