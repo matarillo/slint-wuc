@@ -374,6 +374,8 @@ pub struct Win32WindowAdapter {
     target: RefCell<Option<DesktopWindowTarget>>,
     renderer: Renderer,
     size: Cell<PhysicalSize>,
+    /// A size set before the HWND exists, applied once its scale factor is known.
+    requested_size: Cell<Option<WindowSize>>,
     sync_pending: Cell<bool>,
     visible: Cell<bool>,
 }
@@ -400,6 +402,7 @@ impl Win32WindowAdapter {
             target: RefCell::new(None),
             renderer: Renderer::new(tree),
             size: Cell::new(PhysicalSize::new(800, 600)),
+            requested_size: Cell::new(None),
             sync_pending: Cell::new(false),
             visible: Cell::new(false),
         }))
@@ -423,6 +426,11 @@ impl Win32WindowAdapter {
     /// The visuals of the window's items, as text; see [`VisualTree::dump`].
     pub fn dump_visuals(&self) -> alloc::string::String {
         self.renderer.tree.borrow().dump()
+    }
+
+    /// The number of visuals the window keeps for items.
+    pub fn node_count(&self) -> usize {
+        self.renderer.tree.borrow().node_count()
     }
 
     /// The number of sync passes the window ran.
@@ -500,11 +508,13 @@ impl Win32WindowAdapter {
             let _ = GetClientRect(hwnd, &mut rc);
         }
         self.resized(PhysicalSize::new(rc.right as u32, rc.bottom as u32));
+        if let Some(size) = self.requested_size.take() {
+            self.set_size(size);
+        }
         Ok(hwnd)
     }
 
     fn scale_factor_changed(&self, scale: f32) {
-        self.renderer.tree.borrow().set_scale_factor(scale);
         self.window.dispatch_event(WindowEvent::ScaleFactorChanged { scale_factor: scale });
     }
 
@@ -522,7 +532,11 @@ impl Win32WindowAdapter {
             return;
         };
         let inner = self.inner();
-        inner.sync_visuals(|trees| tree.sync(trees));
+        inner.sync_visuals(|trees| {
+            // Read inside the redraw tracker, so a scale factor change requests a sync pass.
+            tree.set_scale_factor(inner.scale_factor());
+            tree.sync(trees)
+        });
         drop(tree);
         if inner.has_active_animations() {
             request_frame();
@@ -574,9 +588,12 @@ impl WindowAdapter for Win32WindowAdapter {
         }
     }
 
-    fn set_size(&self, size: WindowSize) {
-        let size = size.to_physical(self.window.scale_factor());
+    fn set_size(&self, requested: WindowSize) {
+        let size = requested.to_physical(self.window.scale_factor());
         let Some(hwnd) = self.hwnd.get() else {
+            if !self.detached {
+                self.requested_size.set(Some(requested));
+            }
             // Without an HWND there is no WM_SIZE to wait for.
             self.resized(size);
             return;
@@ -636,15 +653,8 @@ impl WindowAdapter for Win32WindowAdapter {
     }
 }
 
-impl WindowAdapterInternal for Win32WindowAdapter {
-    fn unregister_item_tree(
-        &self,
-        component: ItemTreeRef,
-        items: &mut dyn Iterator<Item = Pin<ItemRef<'_>>>,
-    ) {
-        let _ = self.renderer.free_graphics_resources(component, items);
-    }
-}
+// `from_window` downcasts through it.
+impl WindowAdapterInternal for Win32WindowAdapter {}
 
 impl Drop for Win32WindowAdapter {
     fn drop(&mut self) {

@@ -1,0 +1,37 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[package]
+name = "slint-fork-fixtures"
+description = "Hand-written item trees in the shape of generated code, for testing the visual tree"
+authors.workspace = true
+edition = "2024"
+license.workspace = true
+publish = false
+rust-version.workspace = true
+version = "0.0.0"
+
+[dependencies]
+i-slint-core = { path = "../../crates/core" }
+vtable = { workspace = true }
+# Generated code derives `FieldOffsets` on its component structs; the fixtures do the same.
+const-field-offset = { version = "0.2.1" }
+
+# What pixel capture needs, see `src/capture.rs`.
+windows = { workspace = true, features = [
+    "Foundation",
+    "Foundation_Numerics",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "UI_Composition",
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_UI_WindowsAndMessaging",
+] }
+windows-numerics = "0.3"
+windows-future = "0.3"
