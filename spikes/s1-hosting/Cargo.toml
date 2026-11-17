@@ -1,0 +1,10 @@
+[package]
+name = "s1-hosting"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+windows = { workspace = true }
+windows-future = { workspace = true }
+windows-numerics = { workspace = true }
