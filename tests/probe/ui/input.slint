@@ -5,7 +5,9 @@
 // - The square on the left turns light under the mouse, orange while pressed, and shows the
 //   hand cursor. Each click adds a green square below it; a right click adds a purple one.
 // - The striped area on the right scrolls with the wheel, a touchpad, a finger or a drag.
-// - Each key press adds a blue square at the bottom; keys with Ctrl add a red one.
+// - Each key press adds a blue square at the bottom; keys with Ctrl add a red one. The
+//   modifiers themselves add nothing, though they are key presses too, as upstream sends them.
+// - Alt+F4 closes the window.
 export component Input inherits Window {
     width: 320px;
     height: 260px;
@@ -85,6 +87,11 @@ export component Input inherits Window {
         width: 0;
         height: 0;
         key-pressed(event) => {
+            if (event.text == Key.Control || event.text == Key.ControlR || event.text == Key.Shift
+                || event.text == Key.ShiftR || event.text == Key.Alt || event.text == Key.AltGr
+                || event.text == Key.Meta || event.text == Key.MetaR) {
+                return reject;
+            }
             root.key(event.modifiers.control ? #e03030 : #3080e0);
             accept
         }

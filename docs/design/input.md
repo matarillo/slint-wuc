@@ -68,8 +68,8 @@ Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is th
   - The system sends a Ctrl before an AltGr, as AltGr is Ctrl+Alt: that Ctrl, found by looking at the next key message, isn't a key.
   - The digits of an Alt code (Alt+0233 on the numeric keypad) aren't keys either; `WM_CHAR` delivers the character when Alt is released.
 - Auto-repeat (bit 30 of `lParam`) sets `KeyEvent::repeat`.
-- A `WM_SYSKEYDOWN` that Slint doesn't use goes to `DefWindowProc`, which closes the window on Alt+F4 and opens the system menu on Alt+Space.
-  A key that a `FocusScope` accepts doesn't, so an application can take Alt+F4 for itself.
+- As in winit, every `WM_SYSKEYDOWN` also goes to `DefWindowProc`, whatever Slint did with it, which closes the window on Alt+F4 and opens the system menu on Alt+Space.
+  The key down of Alt+F4 isn't dispatched to Slint at all, so no `FocusScope` can keep the window from closing.
   Neither `WM_SYSKEYUP` nor the release of Alt does: with no menu bar, `DefWindowProc` would start the system's menu mode on Alt, which takes the keyboard from the window.
   The `WM_SYSCHAR` that Alt+Space made is out of the queue by then, and goes to `DefWindowProc` too.
 - `WM_ACTIVATE` dispatches `WindowActiveChanged`; on activation, `release_modifiers_not_held` with the modifiers `GetKeyState` reports.

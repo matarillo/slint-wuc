@@ -16,7 +16,7 @@ use super::Win32WindowAdapter;
 use crate::SharedString;
 use crate::input::{InternalKeyEvent, KeyEvent, KeyEventType, key_codes};
 use crate::items::KeyboardModifiers;
-use crate::platform::{WindowEvent, WindowEventDispatchResult};
+use crate::platform::WindowEvent;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
@@ -25,10 +25,10 @@ use windows::Win32::Foundation::*;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetKeyState, GetKeyboardLayout, GetKeyboardState, HKL, MAPVK_VK_TO_VSC, MapVirtualKeyExW,
     ToUnicodeEx, VIRTUAL_KEY, VK_APPS, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE,
-    VK_F1, VK_F24, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU,
-    VK_NEXT, VK_NUMPAD0, VK_NUMPAD9, VK_PACKET, VK_PAUSE, VK_PRIOR, VK_PROCESSKEY, VK_RCONTROL,
-    VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT, VK_SNAPSHOT, VK_SPACE,
-    VK_TAB, VK_UP,
+    VK_F1, VK_F4, VK_F24, VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_LWIN,
+    VK_MENU, VK_NEXT, VK_NUMPAD0, VK_NUMPAD9, VK_PACKET, VK_PAUSE, VK_PRIOR, VK_PROCESSKEY,
+    VK_RCONTROL, VK_RETURN, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SCROLL, VK_SHIFT,
+    VK_SNAPSHOT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -88,10 +88,11 @@ pub(super) fn handle(
 
 /// `WM_KEYDOWN`, `WM_SYSKEYDOWN`, `WM_KEYUP` and `WM_SYSKEYUP`.
 ///
-/// Plain key messages return 0. A `WM_SYSKEYDOWN` that Slint doesn't use goes to `DefWindowProc`:
-/// Alt+F4 closes the window there, and Alt+Space opens the system menu. `WM_SYSKEYUP` never
-/// does: with no menu bar, releasing Alt would start the system's menu mode, which takes the
-/// keyboard from the window.
+/// Plain key messages return 0. As in winit, every `WM_SYSKEYDOWN` also goes to `DefWindowProc`,
+/// whatever Slint did with it, and Alt+F4 only goes there: it closes the window, and no
+/// `FocusScope` can take it. Alt+Space opens the system menu. `WM_SYSKEYUP` never goes there:
+/// with no menu bar, releasing Alt would start the system's menu mode, which takes the keyboard
+/// from the window.
 fn key_message(
     state: &State,
     adapter: &Win32WindowAdapter,
@@ -151,18 +152,20 @@ fn key_message(
     } else {
         translate(vk, scan, extended, &keys, hkl, alt_graph, &composed)
     };
-    let mut used = false;
+    let alt_f4 = msg == WM_SYSKEYDOWN && vk == VK_F4.0;
     // A dead key, and a key without text, dispatch nothing; the dead key shows when the key
     // after it composes the accent.
-    if let Translation::Text { text, without_modifiers } = translation {
+    if let Translation::Text { text, without_modifiers } = translation
+        && !alt_f4
+    {
         let event_type = if down { KeyEventType::KeyPressed } else { KeyEventType::KeyReleased };
-        used = dispatch(adapter, event_type, text, without_modifiers, repeat);
+        dispatch(adapter, event_type, text, without_modifiers, repeat);
     }
     if down && chars.dead {
         state.dead_key.set(vk);
     }
 
-    if msg != WM_SYSKEYDOWN || used {
+    if msg != WM_SYSKEYDOWN {
         return LRESULT(0);
     }
     let result = unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
@@ -251,24 +254,21 @@ fn take_chars(hwnd: HWND) -> Chars {
     chars
 }
 
-/// Dispatches a key event, and returns whether Slint used it.
+/// Dispatches a key event.
 fn dispatch(
     adapter: &Win32WindowAdapter,
     event_type: KeyEventType,
     text: SharedString,
     text_without_modifiers: SharedString,
     repeat: bool,
-) -> bool {
+) {
     let event = InternalKeyEvent {
         key_event: KeyEvent { text, repeat, ..Default::default() },
         event_type,
         text_without_modifiers,
         ..Default::default()
     };
-    matches!(
-        adapter.window.dispatch_event_with_result(WindowEvent::internal(event)),
-        Ok(WindowEventDispatchResult::Accepted)
-    )
+    adapter.window.dispatch_event(WindowEvent::internal(event));
 }
 
 /// What a key message means to Slint.

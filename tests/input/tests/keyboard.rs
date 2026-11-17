@@ -624,7 +624,7 @@ fn activation_follows_the_window_and_releases_modifiers(keys: &Keys) {
     activate(WA_ACTIVE);
 }
 
-fn alt_f4_closes_the_window_when_slint_does_not_use_it() {
+fn alt_f4_closes_the_window() {
     let f = Fixture::new();
     // DefWindowProc turns Alt+F4 into a close request only for the active window of the thread.
     f.activate();
@@ -638,35 +638,33 @@ fn alt_f4_closes_the_window_when_slint_does_not_use_it() {
         }
     });
 
-    // The focus scope uses Alt+F4: it doesn't reach DefWindowProc, and nothing closes.
+    // The focus scope accepts every key, but as in winit, Alt+F4 never reaches it: it goes to
+    // DefWindowProc, which turns it into WM_SYSCOMMAND(SC_CLOSE), and that into WM_CLOSE,
+    // which asks the window to close.
     f.key(WM_SYSKEYDOWN, ALT, false);
     f.key(WM_SYSKEYDOWN, F4, false);
+    pump();
+    assert_eq!(close_requests.get(), 1);
     f.key(WM_SYSKEYUP, F4, false);
     f.key(WM_KEYUP, ALT, false);
-    pump();
-    assert_eq!(close_requests.get(), 0);
-    assert_eq!(f.log(), format!("+{0}+{1}-{1}-{0}", code(key_codes::Alt), code(key_codes::F4)));
+    // The scope saw Alt, and F4's release, as winit reports them.
+    assert_eq!(f.log(), format!("+{0}-{1}-{0}", code(key_codes::Alt), code(key_codes::F4)));
+    assert_eq!(close_requests.get(), 1);
 
-    // The focus scope rejects it: DefWindowProc turns it into WM_SYSCOMMAND(SC_CLOSE), and
-    // that into WM_CLOSE, which asks the window to close.
+    // When the focus scope rejects the keys, it is the same.
     f.ui.set_accept_keys(false);
-    f.clear_log();
     f.key(WM_SYSKEYDOWN, ALT, false);
     f.key(WM_SYSKEYDOWN, F4, false);
     pump();
-    assert_eq!(close_requests.get(), 1);
-    // The window saw the key, with Alt.
-    assert_eq!(f.ui.get_pressed().as_str(), code(key_codes::F4));
-    assert!(f.ui.get_modifiers().alt);
+    assert_eq!(close_requests.get(), 2);
     f.key(WM_SYSKEYUP, F4, false);
     f.key(WM_KEYUP, ALT, false);
-    assert_eq!(close_requests.get(), 1);
 
     // Keys without Alt go to the focus scope, and when it rejects them, nothing happens.
     f.down(F4);
     f.up(F4);
     pump();
-    assert_eq!(close_requests.get(), 1);
+    assert_eq!(close_requests.get(), 2);
 }
 
 /// Opens the clipboard with no owner, for the test to look at it and clear it.
@@ -733,6 +731,6 @@ fn keyboard_messages() {
     dead_keys_compose_with_the_next_key();
     altgr_gives_the_third_level_of_a_key(&keys);
     activation_follows_the_window_and_releases_modifiers(&keys);
-    alt_f4_closes_the_window_when_slint_does_not_use_it();
+    alt_f4_closes_the_window();
     the_clipboard_round_trips_text();
 }
