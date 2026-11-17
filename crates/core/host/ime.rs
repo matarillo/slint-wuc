@@ -213,7 +213,7 @@ fn dispatch(
         preedit_selection,
         ..Default::default()
     };
-    adapter.window.dispatch_event(WindowEvent::internal(event));
+    super::popup::key_window(adapter).window().dispatch_event(WindowEvent::internal(event));
 }
 
 fn disable(ime: &Ime, hwnd: HWND) {

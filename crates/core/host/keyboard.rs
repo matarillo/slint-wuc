@@ -274,7 +274,7 @@ fn dispatch(
         text_without_modifiers,
         ..Default::default()
     };
-    adapter.window.dispatch_event(WindowEvent::internal(event));
+    super::popup::key_window(adapter).window().dispatch_event(WindowEvent::internal(event));
 }
 
 /// What a key message means to Slint.

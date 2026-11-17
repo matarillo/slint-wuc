@@ -3,7 +3,6 @@
 // Cases that can't pass yet, each with the missing piece and the phase that adds it.
 // A reason that starts with `BUG:` is a failure that the missing pieces don't explain.
 
-const NATIVE_POPUP: &str = "popups in windows of their own (use_native_popup), phase 6";
 const INTERPRETER: &str = concat!(
     "slint-interpreter (the embedded component is compiled at run time), ",
     "not part of this fork, listed as a gap in phase 7"
@@ -18,10 +17,7 @@ const TESTING_BACKEND_AND_TRAY: &str = concat!(
 );
 
 /// Cases that are generated and compiled, but ignored when running.
-pub const IGNORED: &[(&str, &str)] = &[
-    ("popups/contextmenu_native_popup.slint", NATIVE_POPUP),
-    ("popups/popupwindow_size_preferred.slint", NATIVE_POPUP),
-];
+pub const IGNORED: &[(&str, &str)] = &[];
 
 /// Cases that aren't generated: the Slint compiler or the Rust compiler rejects them.
 pub const NOT_BUILT: &[(&str, &str)] = &[

@@ -38,6 +38,10 @@ path = "src/text.rs"
 name = "probe-snapshot"
 path = "src/snapshot.rs"
 
+[[bin]]
+name = "probe-gallery"
+path = "src/gallery.rs"
+
 [dependencies]
 slint = { path = "../../crates/slint" }
 # For the visual tree dump of `--check`.

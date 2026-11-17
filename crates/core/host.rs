@@ -54,6 +54,7 @@ mod input;
 mod keyboard;
 #[doc(hidden)]
 pub mod pointer;
+mod popup;
 mod snapshot;
 mod test_font;
 
@@ -202,7 +203,7 @@ impl Platform {
 
 impl crate::platform::Platform for Platform {
     fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, PlatformError> {
-        Ok(Win32WindowAdapter::with_mode(&self.compositor, self.headless)?)
+        Ok(Win32WindowAdapter::with_mode(&self.compositor, self.headless, None)?)
     }
 
     fn run_event_loop(&self) -> Result<(), PlatformError> {
@@ -518,19 +519,39 @@ pub struct Win32WindowAdapter {
     /// Only kept for detached windows: real ones hand the requests to the input method.
     ime_requests: RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>>,
     ime: ime::Ime,
+    popup: Option<popup::Popup>,
 }
 
 impl Win32WindowAdapter {
     pub fn new(compositor: &Compositor) -> Result<Rc<Self>, PlatformError> {
-        Self::with_mode(compositor, false)
+        Self::with_mode(compositor, false, None)
     }
 
     /// A window without an HWND, for tests.
     pub fn new_detached(compositor: &Compositor) -> Result<Rc<Self>, PlatformError> {
-        Self::with_mode(compositor, true)
+        Self::with_mode(compositor, true, None)
     }
 
-    fn with_mode(compositor: &Compositor, detached: bool) -> Result<Rc<Self>, PlatformError> {
+    /// A popup of `parent`, detached if `parent` is.
+    fn new_popup(
+        parent: &Self,
+        kind: crate::window::WindowKind,
+    ) -> Result<Rc<Self>, PlatformError> {
+        let compositor = parent.renderer.tree.borrow().compositor().clone();
+        let popup =
+            popup::Popup { parent: parent.self_weak.clone(), kind, position: Cell::new(None) };
+        let this = Self::with_mode(&compositor, parent.detached, Some(popup))?;
+        this.native_popup.set(parent.native_popup.get());
+        this.renderer.fixed_test_font.set(parent.renderer.fixed_test_font.get());
+        this.scale_factor_changed(parent.window.scale_factor());
+        Ok(this)
+    }
+
+    fn with_mode(
+        compositor: &Compositor,
+        detached: bool,
+        popup: Option<popup::Popup>,
+    ) -> Result<Rc<Self>, PlatformError> {
         let root =
             compositor.CreateContainerVisual().map_err(|e| PlatformError::Other(e.message()))?;
         let tree = VisualTree::new(compositor.clone(), root);
@@ -557,6 +578,7 @@ impl Win32WindowAdapter {
             native_popup: Cell::new(false),
             ime_requests: Default::default(),
             ime: Default::default(),
+            popup,
         }))
     }
 
@@ -625,31 +647,40 @@ impl Win32WindowAdapter {
             };
             RegisterClassW(&class);
             let size = self.size.get();
+            let (style, ex_style) = match &self.popup {
+                Some(_) => (popup::Popup::STYLE, popup::Popup::EX_STYLE),
+                None => (WS_OVERLAPPEDWINDOW, WS_EX_NOREDIRECTIONBITMAP),
+            };
             let mut rc =
                 RECT { left: 0, top: 0, right: size.width as i32, bottom: size.height as i32 };
-            let _ = AdjustWindowRectExForDpi(
-                &mut rc,
-                WS_OVERLAPPEDWINDOW,
-                false,
-                WS_EX_NOREDIRECTIONBITMAP,
-                GetDpiForSystem(),
-            );
+            let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, GetDpiForSystem());
+            let frame = (rc.right - rc.left, rc.bottom - rc.top);
+            let (position, owner) = match &self.popup {
+                Some(popup) => (
+                    popup.screen_position(frame).unwrap_or_default(),
+                    popup.parent.upgrade().and_then(|p| p.hwnd.get()),
+                ),
+                None => (POINT { x: CW_USEDEFAULT, y: CW_USEDEFAULT }, None),
+            };
             CreateWindowExW(
-                WS_EX_NOREDIRECTIONBITMAP,
+                ex_style,
                 w!("SlintWindow"),
                 &*self.title.borrow(),
-                WS_OVERLAPPEDWINDOW,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                rc.right - rc.left,
-                rc.bottom - rc.top,
-                None,
+                style,
+                position.x,
+                position.y,
+                frame.0,
+                frame.1,
+                owner,
                 None,
                 Some(instance.into()),
                 None,
             )
             .map_err(err)?
         };
+        if self.popup.is_some() {
+            popup::created(hwnd);
+        }
         // The window procedure finds the adapter through a weak reference in GWLP_USERDATA;
         // WM_NCDESTROY releases it.
         unsafe {
@@ -727,6 +758,26 @@ impl Win32WindowAdapter {
         &self,
     ) -> &RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>> {
         &self.ime_requests
+    }
+
+    /// Moves a popup's window where its position and size put it on the screen.
+    fn place_popup(&self) {
+        let (Some(popup), Some(hwnd)) = (&self.popup, self.hwnd.get()) else { return };
+        let size = self.size.get();
+        let Some(p) = popup.screen_position((size.width as i32, size.height as i32)) else {
+            return;
+        };
+        unsafe {
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                p.x,
+                p.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
     }
 
     /// A point in client pixels, in logical pixels.
@@ -808,8 +859,13 @@ impl WindowAdapter for Win32WindowAdapter {
         }
         if !self.detached {
             let hwnd = self.ensure_hwnd()?;
+            let show = match (visible, &self.popup) {
+                (false, _) => SW_HIDE,
+                (true, Some(_)) => SW_SHOWNOACTIVATE,
+                (true, None) => SW_SHOW,
+            };
             unsafe {
-                let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
+                let _ = ShowWindow(hwnd, show);
             }
         }
         self.visible.set(visible);
@@ -829,6 +885,18 @@ impl WindowAdapter for Win32WindowAdapter {
     }
 
     fn set_position(&self, position: WindowPosition) {
+        if let Some(popup) = &self.popup {
+            // The core gives a popup's position in its parent's logical client coordinates.
+            let position = match position {
+                WindowPosition::Logical(position) => position,
+                WindowPosition::Physical(position) => {
+                    position.to_logical(self.window.scale_factor())
+                }
+            };
+            popup.position.set(Some(position));
+            self.place_popup();
+            return;
+        }
         let Some(hwnd) = self.hwnd.get() else { return };
         let p = position.to_physical(self.window.scale_factor());
         unsafe {
@@ -876,6 +944,8 @@ impl WindowAdapter for Win32WindowAdapter {
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
         }
+        // At its new size, the popup may reach past the work area.
+        self.place_popup();
     }
 
     fn size(&self) -> PhysicalSize {
@@ -910,6 +980,15 @@ impl WindowAdapter for Win32WindowAdapter {
 
         let constraints = properties.layout_constraints();
         self.constraints.set(constraints);
+        let current = self.size.get().to_logical(self.window.scale_factor());
+        if self.popup.is_some() {
+            // As a popup drawn inside its window: the layout's preferred size, as it changes.
+            let size = clamp_to(constraints, preferred_or(constraints, current));
+            if size != current {
+                self.set_size(WindowSize::Logical(size));
+            }
+            return;
+        }
         if self.detached {
             // As upstream's testing window: the preferred size, once, without resizing the
             // window item. Upstream's cases depend on it.
@@ -918,24 +997,11 @@ impl WindowAdapter for Win32WindowAdapter {
             }
             return;
         }
-        let current = self.size.get().to_logical(self.window.scale_factor());
-        // Without a size of its own, the window takes the layout's preferred size;
-        // an axis the layout has no preference for keeps the default.
-        let mut size = if self.size_set.get() {
-            current
-        } else {
-            let preferred = constraints.preferred;
-            LogicalSize::new(
-                if preferred.width > 0. { preferred.width } else { current.width },
-                if preferred.height > 0. { preferred.height } else { current.height },
-            )
-        };
-        if let Some(min) = constraints.min {
-            size = LogicalSize::new(size.width.max(min.width), size.height.max(min.height));
-        }
-        if let Some(max) = constraints.max {
-            size = LogicalSize::new(size.width.min(max.width), size.height.min(max.height));
-        }
+        // Without a size of its own, the window takes the layout's preferred size.
+        let size = clamp_to(
+            constraints,
+            if self.size_set.get() { current } else { preferred_or(constraints, current) },
+        );
         if !self.size_set.get() || size != current {
             self.set_size(WindowSize::Logical(size));
         }
@@ -975,6 +1041,21 @@ impl WindowAdapterInternal for Win32WindowAdapter {
             input::start_window_move(hwnd);
         }
     }
+
+    fn create_child_window_adapter(
+        &self,
+        kind: crate::window::WindowKind,
+    ) -> Option<Rc<dyn WindowAdapter>> {
+        if self.detached && !self.native_popup.get() {
+            return None;
+        }
+        Self::new_popup(self, kind).ok().map(|popup| popup as Rc<dyn WindowAdapter>)
+    }
+
+    fn get_parent(&self) -> Option<Rc<dyn WindowAdapter>> {
+        let parent = self.popup.as_ref()?.parent.upgrade()?;
+        Some(parent as Rc<dyn WindowAdapter>)
+    }
 }
 
 impl Drop for Win32WindowAdapter {
@@ -1003,6 +1084,14 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let Some(adapter) = weak.upgrade() else {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     };
+    match &adapter.popup {
+        Some(popup) => {
+            if let Some(result) = popup::handle(popup, msg, wp, lp) {
+                return result;
+            }
+        }
+        None => popup::handle_owner(&adapter, msg, wp),
+    }
     if let Some(result) = input::handle(&adapter, hwnd, msg, wp, lp) {
         return result;
     }
@@ -1132,6 +1221,28 @@ fn trace_dpi(args: core::fmt::Arguments) {
 }
 
 /// `size` in physical pixels at `dpi`, rounded to the nearest pixel.
+/// The layout's preferred size; an axis the layout has no preference for keeps `current`.
+fn preferred_or(
+    constraints: crate::window::LayoutConstraints,
+    current: LogicalSize,
+) -> LogicalSize {
+    let preferred = constraints.preferred;
+    LogicalSize::new(
+        if preferred.width > 0. { preferred.width } else { current.width },
+        if preferred.height > 0. { preferred.height } else { current.height },
+    )
+}
+
+fn clamp_to(constraints: crate::window::LayoutConstraints, mut size: LogicalSize) -> LogicalSize {
+    if let Some(min) = constraints.min {
+        size = LogicalSize::new(size.width.max(min.width), size.height.max(min.height));
+    }
+    if let Some(max) = constraints.max {
+        size = LogicalSize::new(size.width.min(max.width), size.height.min(max.height));
+    }
+    size
+}
+
 fn to_physical(size: LogicalSize, dpi: u32) -> PhysicalSize {
     let scale = dpi as f64 / 96.0;
     let px = |v: f32| (v as f64 * scale).round().clamp(0.0, (i32::MAX / 2) as f64) as u32;
