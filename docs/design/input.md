@@ -35,6 +35,10 @@ Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is th
   mapped to `IDC_*`; other hit-test codes go to `DefWindowProc`.
   A change while the pointer is over the client area applies right away.
   Image cursors show the arrow until Phase 5.
+- `WindowMoveArea` asks for `start_window_move` while the window dispatches a mouse move.
+  The host posts itself a message, and from there, if the left button is still down, ends the press with `Exit`,
+  releases the capture and sends `WM_NCLBUTTONDOWN` with `HTCAPTION`: the system's move loop, which returns on the button up.
+  Tests stop at the posted message, since the loop waits for the real button; the move itself is a manual check.
 - The code is `crates/core/host/input.rs`.
 
 ## Keyboard

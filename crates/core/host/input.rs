@@ -3,7 +3,7 @@
 //! Mouse input: Win32 mouse messages become the pointer events of the window
 //! (`docs/design/input.md`).
 
-use super::Win32WindowAdapter;
+use super::{WM_APP_WINDOW_MOVE, Win32WindowAdapter};
 use crate::input::{BackendMouseEvent, TouchPhase};
 use crate::items::{BuiltInMouseCursor, PointerEventButton};
 use crate::lengths::LogicalPoint;
@@ -170,11 +170,36 @@ pub(super) fn handle(
             }
             Some(LRESULT(0))
         }
+        WM_APP_WINDOW_MOVE => {
+            // Only while the left button that started the drag is still down.
+            if mouse.buttons.get() & button_bit(PointerEventButton::Left) != 0 {
+                // The system's move loop takes the button up, so the press ends here.
+                mouse.buttons.set(0);
+                dispatch(BackendMouseEvent::Exit);
+                unsafe {
+                    let _ = ReleaseCapture();
+                    // Returns when the button is released.
+                    SendMessageW(hwnd, WM_NCLBUTTONDOWN, Some(WPARAM(HTCAPTION as usize)), None);
+                }
+            }
+            Some(LRESULT(0))
+        }
         WM_SETCURSOR if (lp.0 & 0xffff) as u32 == HTCLIENT => {
             show_cursor(mouse.cursor.get());
             Some(LRESULT(1))
         }
         _ => None,
+    }
+}
+
+/// Lets the user move the window by dragging it, as a `WindowMoveArea` asks while the left
+/// button is down.
+///
+/// The request comes while the window dispatches a mouse move, so the system's move loop
+/// starts from a posted message instead, once that dispatch is over.
+pub(super) fn start_window_move(hwnd: HWND) {
+    unsafe {
+        let _ = PostMessageW(Some(hwnd), WM_APP_WINDOW_MOVE, WPARAM(0), LPARAM(0));
     }
 }
 

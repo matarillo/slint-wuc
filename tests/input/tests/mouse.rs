@@ -175,6 +175,34 @@ fn the_cursor_follows_the_touch_area() {
     assert_eq!(unsafe { GetCursor() }, system(IDC_ARROW));
 }
 
+/// The system's move loop would wait for the real mouse button, so this only checks that the
+/// drag asks for it, after the dispatch of the move that started it.
+fn dragging_a_window_move_area_starts_moving_the_window() {
+    const WM_APP_WINDOW_MOVE: u32 = WM_APP + 5;
+    let f = Fixture::new();
+    let pending = || {
+        let mut msg = MSG::default();
+        unsafe {
+            PeekMessageW(&mut msg, Some(f.hwnd), WM_APP_WINDOW_MOVE, WM_APP_WINDOW_MOVE, PM_REMOVE)
+        }
+        .as_bool()
+    };
+    f.mouse(WM_MOUSEMOVE, 0, 150., 150.);
+    f.mouse(WM_LBUTTONDOWN, MK_LBUTTON, 150., 150.);
+    f.mouse(WM_MOUSEMOVE, MK_LBUTTON, 151., 150.);
+    assert!(!pending(), "a move within the drag threshold");
+    f.mouse(WM_MOUSEMOVE, MK_LBUTTON, 170., 150.);
+    assert!(pending());
+    f.mouse(WM_LBUTTONUP, 0, 170., 150.);
+
+    // Over the touch area, a drag is no window move.
+    f.mouse(WM_MOUSEMOVE, 0, 40., 30.);
+    f.mouse(WM_LBUTTONDOWN, MK_LBUTTON, 40., 30.);
+    f.mouse(WM_MOUSEMOVE, MK_LBUTTON, 80., 30.);
+    f.mouse(WM_LBUTTONUP, 0, 80., 30.);
+    assert!(!pending());
+}
+
 #[test]
 fn mouse_messages() {
     a_click_reaches_the_touch_area();
@@ -185,4 +213,5 @@ fn mouse_messages() {
     each_button_reaches_the_touch_area();
     a_wheel_notch_scrolls_sixty_pixels();
     the_cursor_follows_the_touch_area();
+    dragging_a_window_move_area_starts_moving_the_window();
 }

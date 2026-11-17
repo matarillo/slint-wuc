@@ -49,6 +49,8 @@ const WM_APP_INVOKE: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
 const WM_APP_SYNC: u32 = WM_APP + 3;
 const WM_APP_FRAME: u32 = WM_APP + 4;
+/// Starts moving the window with the mouse; see `input::start_window_move`.
+const WM_APP_WINDOW_MOVE: u32 = WM_APP + 5;
 const TIMER_SLINT: usize = 1;
 
 /// The platform of a UI thread: its event loop and the services `SlintContext` asks for.
@@ -770,6 +772,12 @@ impl WindowAdapterInternal for Win32WindowAdapter {
             _ => self.mouse.set_cursor(crate::items::BuiltInMouseCursor::Default),
         }
         crate::cursor::MouseCursorHandling::Platform
+    }
+
+    fn start_window_move(&self) {
+        if let Some(hwnd) = self.hwnd.get() {
+            input::start_window_move(hwnd);
+        }
     }
 }
 

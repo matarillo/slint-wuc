@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// A touch area in the top left corner, which records what reaches it.
+// A touch area in the top left corner, which records what reaches it,
+// and a window move area in the bottom right corner.
 export component MouseTest inherits Window {
     width: 200px;
     height: 200px;
@@ -36,5 +37,12 @@ export component MouseTest inherits Window {
             root.scroll-y += event.delta-y;
             accept
         }
+    }
+
+    WindowMoveArea {
+        x: 100px;
+        y: 100px;
+        width: 100px;
+        height: 100px;
     }
 }
