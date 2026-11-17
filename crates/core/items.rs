@@ -808,13 +808,20 @@ impl Item for Clip {
     }
 
     fn update_visual(
-        self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
-    ) -> crate::items::RenderingResult {
-        // TODO(phase 2): not shown yet.
-        crate::items::RenderingResult::ContinueRenderingChildren
+        self: Pin<&Self>,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        size: LogicalSize,
+    ) -> RenderingResult {
+        let content_box = self.clip().then(|| {
+            crate::item_rendering::clip_content_box(
+                size,
+                self.logical_border_radius(),
+                self.border_width(),
+            )
+        });
+        visual.clip(size, content_box);
+        RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -928,13 +935,13 @@ impl Item for Opacity {
     }
 
     fn update_visual(
-        self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
-    ) -> crate::items::RenderingResult {
-        // TODO(phase 2): not shown yet.
-        crate::items::RenderingResult::ContinueRenderingChildren
+        self: Pin<&Self>,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        _size: LogicalSize,
+    ) -> RenderingResult {
+        visual.opacity(self.opacity());
+        RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1064,13 +1071,13 @@ impl Item for Layer {
     }
 
     fn update_visual(
-        self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
-    ) -> crate::items::RenderingResult {
-        // TODO(phase 2): not shown yet.
-        crate::items::RenderingResult::ContinueRenderingChildren
+        self: Pin<&Self>,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        _size: LogicalSize,
+    ) -> RenderingResult {
+        visual.plain();
+        RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1174,13 +1181,18 @@ impl Item for Transform {
     }
 
     fn update_visual(
-        self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
-    ) -> crate::items::RenderingResult {
-        // TODO(phase 2): not shown yet.
-        crate::items::RenderingResult::ContinueRenderingChildren
+        self: Pin<&Self>,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        _size: LogicalSize,
+    ) -> RenderingResult {
+        visual.transform(
+            self.transform_rotation(),
+            self.transform_scale_x(),
+            self.transform_scale_y(),
+            self.transform_origin().to_euclid(),
+        );
+        RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

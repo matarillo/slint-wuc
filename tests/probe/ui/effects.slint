@@ -1,0 +1,56 @@
+// Properties the compiler lowers to the Clip, Opacity, Transform and Layer elements.
+export component Effects inherits Window {
+    width: 200px;
+    height: 100px;
+    background: #000000;
+
+    in property <bool> clipped: true;
+    in property <float> fade: 0.5;
+    in property <angle> turn: 90deg;
+
+    Rectangle {
+        x: 10px;
+        y: 10px;
+        width: 40px;
+        height: 40px;
+        background: #ff0000;
+        border-radius: 8px;
+        clip: root.clipped;
+
+        Rectangle {
+            x: 20px;
+            y: 20px;
+            width: 40px;
+            height: 40px;
+            background: #00ff00;
+        }
+    }
+
+    Rectangle {
+        x: 60px;
+        y: 10px;
+        width: 40px;
+        height: 40px;
+        background: #0000ff;
+        opacity: root.fade;
+    }
+
+    Rectangle {
+        x: 110px;
+        y: 10px;
+        width: 40px;
+        height: 20px;
+        background: #ffff00;
+        transform-rotation: root.turn;
+        transform-scale-x: 2;
+    }
+
+    Rectangle {
+        x: 160px;
+        y: 10px;
+        width: 20px;
+        height: 20px;
+        background: #ffffff;
+        cache-rendering-hint: true;
+    }
+}

@@ -10,8 +10,9 @@ use crate::graphics::{Brush, GradientStop, ResolvedBrush, resolve_brush};
 use crate::lengths::{PhysicalBorderRadius, PhysicalPx, ScaleFactor};
 use windows::Graphics::IGeometrySource2D;
 use windows::UI::Composition::{
-    CompositionBrush, CompositionColorGradientStopCollection, CompositionGeometry,
-    CompositionMappingMode, CompositionPath, Compositor,
+    CompositionBrush, CompositionClip, CompositionColorGradientStopCollection,
+    CompositionGeometricClip, CompositionGeometry, CompositionMappingMode, CompositionPath,
+    CompositionRoundedRectangleGeometry, Compositor, InsetClip,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_SIZE_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
@@ -228,7 +229,7 @@ pub(super) fn describe_shapes(
     visual: &windows::UI::Composition::ShapeVisual,
 ) -> alloc::string::String {
     use core::fmt::Write;
-    use windows::UI::Composition::{CompositionRoundedRectangleGeometry, CompositionSpriteShape};
+    use windows::UI::Composition::CompositionSpriteShape;
     let mut out = alloc::string::String::new();
     let Ok(shapes) = visual.Shapes() else { return out };
     for shape in &shapes {
@@ -245,20 +246,43 @@ pub(super) fn describe_shapes(
                 shape.StrokeThickness().unwrap_or(0.)
             ));
         }
-        match shape.Geometry().and_then(|g| g.cast::<CompositionRoundedRectangleGeometry>()) {
-            Ok(g) => {
-                let (o, s, r) = (
-                    g.Offset().unwrap_or_default(),
-                    g.Size().unwrap_or_default(),
-                    g.CornerRadius().unwrap_or_default(),
-                );
-                parts.push(alloc::format!("rrect {},{} {}x{} r{}", o.X, o.Y, s.X, s.Y, r.X));
-            }
-            Err(_) => parts.push("path".into()),
-        }
+        parts.push(shape.Geometry().map_or_else(|_| "path".into(), |g| describe_geometry(&g)));
         let _ = write!(out, "{}]", parts.join(" "));
     }
     out
+}
+
+/// Describes a geometry for tree dumps: `rrect x,y wxh r<radius>` or `path`.
+fn describe_geometry(geometry: &CompositionGeometry) -> alloc::string::String {
+    match geometry.cast::<CompositionRoundedRectangleGeometry>() {
+        Ok(g) => {
+            let (o, s, r) = (
+                g.Offset().unwrap_or_default(),
+                g.Size().unwrap_or_default(),
+                g.CornerRadius().unwrap_or_default(),
+            );
+            alloc::format!("rrect {},{} {}x{} r{}", o.X, o.Y, s.X, s.Y, r.X)
+        }
+        Err(_) => "path".into(),
+    }
+}
+
+/// Describes a clip for tree dumps: `inset(left,top,right,bottom)` or the clip's geometry as
+/// `rrect x,y wxh r<radius>` or `path`.
+pub(super) fn describe_clip(clip: &CompositionClip) -> alloc::string::String {
+    if let Ok(c) = clip.cast::<InsetClip>() {
+        return alloc::format!(
+            "inset({},{},{},{})",
+            c.LeftInset().unwrap_or_default(),
+            c.TopInset().unwrap_or_default(),
+            c.RightInset().unwrap_or_default(),
+            c.BottomInset().unwrap_or_default()
+        );
+    }
+    match clip.cast::<CompositionGeometricClip>().and_then(|c| c.Geometry()) {
+        Ok(g) => describe_geometry(&g),
+        Err(_) => "unknown".into(),
+    }
 }
 
 /// Hands a Direct2D geometry to `CompositionPath`.

@@ -7,7 +7,7 @@ mod shapes;
 use crate::item_rendering::{BorderRectLayout, RenderBorderRectangle};
 use crate::item_tree::{ItemTreeRc, ItemVisitorResult, ItemWeak, TraversalOrder};
 use crate::items::{ItemRc, ItemRef, RenderingResult};
-use crate::lengths::{LogicalPoint, LogicalRect, LogicalSize, ScaleFactor};
+use crate::lengths::{LogicalBorderRadius, LogicalPoint, LogicalRect, LogicalSize, ScaleFactor};
 use crate::properties::PropertyTracker;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -16,10 +16,14 @@ use core::pin::Pin;
 use shapes::ui_color;
 use std::collections::HashSet;
 use windows::UI::Composition::{
-    CompositionColorBrush, Compositor, ContainerVisual, ShapeVisual, SpriteVisual,
+    CompositionClip, CompositionColorBrush, Compositor, ContainerVisual, InsetClip, ShapeVisual,
+    SpriteVisual,
 };
 use windows::core::Interface;
-use windows_numerics::{Vector2, Vector3};
+use windows_numerics::{Matrix4x4, Vector2, Vector3};
+
+/// The `TransformMatrix` of a visual that isn't transformed.
+const IDENTITY: Matrix4x4 = Matrix4x4::translation(0., 0., 0.);
 
 /// Per-item handle into the window's [`VisualTree`]. Every item struct embeds one.
 ///
@@ -152,6 +156,76 @@ impl VisualUpdate<'_> {
         }
     }
 
+    /// Makes the node a plain container that draws its children as a group with `opacity`,
+    /// clamped to 0 to 1.
+    pub fn opacity(&mut self, opacity: f32) {
+        self.plain();
+        let _ = self.visual.SetOpacity(opacity.clamp(0., 1.));
+    }
+
+    /// Makes the node a plain container that clips its children to `content_box`, a rectangle
+    /// with corner radii in the node's coordinates, or doesn't clip for `None`. `size` is the
+    /// node's size.
+    pub fn clip(
+        &mut self,
+        size: LogicalSize,
+        content_box: Option<(LogicalRect, LogicalBorderRadius)>,
+    ) {
+        self.plain();
+        let Some((rect, radius)) = content_box else {
+            let _ = self.visual.SetClip(None::<&CompositionClip>);
+            return;
+        };
+        let rect = rect.cast::<f32>() * ScaleFactor::new(1.);
+        let radius = radius.cast::<f32>() * ScaleFactor::new(1.);
+        let clip: windows::core::Result<CompositionClip> = if radius.is_zero() {
+            // Insets are relative to the visual's size, so the clip follows a resize.
+            let size = size.cast::<f32>();
+            let (right, bottom) = (size.width - rect.max_x(), size.height - rect.max_y());
+            if let Ok(current) = self.visual.Clip().and_then(|c| c.cast::<InsetClip>()) {
+                let _ = current.SetLeftInset(rect.min_x());
+                let _ = current.SetTopInset(rect.min_y());
+                let _ = current.SetRightInset(right);
+                let _ = current.SetBottomInset(bottom);
+                return;
+            }
+            self.compositor
+                .CreateInsetClipWithInsets(rect.min_x(), rect.min_y(), right, bottom)
+                .and_then(|c| c.cast())
+        } else {
+            shapes::rounded_rect(self.compositor, rect, radius)
+                .and_then(|g| self.compositor.CreateGeometricClipWithGeometry(&g))
+                .and_then(|c| c.cast())
+        };
+        if let Ok(clip) = clip {
+            let _ = self.visual.SetClip(&clip);
+        }
+    }
+
+    /// Makes the node a plain container that rotates its children by `rotation` degrees
+    /// clockwise and then scales them by `scale_x` and `scale_y`, both about `origin`.
+    pub fn transform(&mut self, rotation: f32, scale_x: f32, scale_y: f32, origin: LogicalPoint) {
+        self.plain();
+        // `Visual.Scale` is applied before `Visual.RotationAngle`, the opposite of Slint's
+        // order, so the matrix is built here. Row vectors: `p' = p * R * S`, translated so
+        // that `origin` stays in place.
+        let (sin, cos) = rotation.to_radians().sin_cos();
+        let (m11, m12, m21, m22) = (cos * scale_x, sin * scale_y, -sin * scale_x, cos * scale_y);
+        let (x, y) = (origin.x as f32, origin.y as f32);
+        let matrix = Matrix4x4 {
+            M11: m11,
+            M12: m12,
+            M21: m21,
+            M22: m22,
+            M33: 1.,
+            M41: x - (x * m11 + y * m21),
+            M42: y - (x * m12 + y * m22),
+            M44: 1.,
+            ..Default::default()
+        };
+        let _ = self.visual.SetTransformMatrix(matrix);
+    }
+
     /// Replaces the node's visual with one of `kind`, keeping its children, geometry, and
     /// place among its siblings.
     fn ensure_kind(&mut self, kind: VisualKind) {
@@ -171,6 +245,7 @@ impl VisualUpdate<'_> {
         if let Ok(clip) = old.Clip() {
             let _ = new.SetClip(&clip);
         }
+        let _ = new.SetTransformMatrix(old.TransformMatrix().unwrap_or(IDENTITY));
         let (old_children, new_children) = (old.Children().unwrap(), new.Children().unwrap());
         // Moving the whole list keeps it in order; InsertAtBottom is O(1) (S2).
         let moved: Vec<_> = (&old_children).into_iter().collect();
@@ -431,7 +506,10 @@ impl VisualTree {
     }
 
     /// A text dump of the visuals below the root, one per line, indented by depth:
-    /// `kind x,y wxh` plus `#rrggbbaa` for a solid fill and `opacity=` when not 1.
+    /// `kind x,y wxh` plus the brush or shapes, then ` opacity=` when not 1,
+    /// ` clip=inset(l,t,r,b)`, ` clip=rrect x,y wxh rR` or ` clip=path` when clipped,
+    /// and ` transform=[m11 m12 m21 m22 m41 m42]` when transformed.
+    /// Transform entries are rounded to 4 decimals.
     pub fn dump(&self) -> alloc::string::String {
         let mut out = alloc::string::String::new();
         for child in &self.root.Children().unwrap() {
@@ -473,6 +551,26 @@ fn dump_visual(visual: &ContainerVisual, depth: usize, out: &mut alloc::string::
     let opacity = visual.Opacity().unwrap_or(1.0);
     if opacity != 1.0 {
         let _ = write!(out, " opacity={opacity}");
+    }
+    if let Ok(clip) = visual.Clip() {
+        let _ = write!(out, " clip={}", shapes::describe_clip(&clip));
+    }
+    let m = visual.TransformMatrix().unwrap_or(IDENTITY);
+    if m != IDENTITY {
+        let round = |v: f32| {
+            let r = (v * 1e4).round() / 1e4;
+            if r == 0. { 0. } else { r }
+        };
+        let _ = write!(
+            out,
+            " transform=[{} {} {} {} {} {}]",
+            round(m.M11),
+            round(m.M12),
+            round(m.M21),
+            round(m.M22),
+            round(m.M41),
+            round(m.M42)
+        );
     }
     out.push('\n');
     for child in &visual.Children().unwrap() {
@@ -725,5 +823,272 @@ mod tests {
         let c = vtable::VRc::into_dyn(RectTree::new((30., 30.), 0));
         visuals.sync(&trees(&[&a, &c]));
         assert_eq!(visuals.dump(), "Container 0,0 10x10\nContainer 0,0 30x30\n");
+    }
+
+    #[test]
+    fn opacity_is_group_opacity_on_the_container() {
+        use crate::testing::OpacityTree;
+        let tree = OpacityTree::new((100., 50.), 1);
+        let item = tree.rect(0);
+        item.opacity.set(0.5);
+        // The child is an opacity item too, and has its own.
+        let child = tree.rect(1);
+        child.opacity.set(1.);
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50 opacity=0.5\n  Container 0,0 10x10\n");
+        child.opacity.set(0.25);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 opacity=0.5\n  Container 0,0 10x10 opacity=0.25\n"
+        );
+        child.opacity.set(1.);
+
+        // Out of range values are clamped.
+        item.opacity.set(1.5);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+        item.opacity.set(-1.);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50 opacity=0\n  Container 0,0 10x10\n");
+    }
+
+    #[test]
+    fn a_clip_without_radius_is_an_inset_clip() {
+        use crate::lengths::LogicalLength;
+        use crate::testing::ClipTree;
+        let tree = ClipTree::new((100., 50.), 1);
+        let item = tree.rect(0);
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+
+        item.clip.set(true);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 clip=inset(0,0,0,0)\n  Container 0,0 10x10\n"
+        );
+
+        // Children are clipped to what's inside the border.
+        item.border_width.set(LogicalLength::new(2.));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 clip=inset(2,2,2,2)\n  Container 0,0 10x10\n"
+        );
+
+        item.clip.set(false);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+    }
+
+    #[test]
+    fn a_clip_with_radius_is_a_geometric_clip() {
+        use crate::lengths::LogicalLength;
+        use crate::testing::ClipTree;
+        let tree = ClipTree::new((100., 50.), 1);
+        let item = tree.rect(0);
+        item.clip.set(true);
+        let radii = [
+            &item.border_top_left_radius,
+            &item.border_top_right_radius,
+            &item.border_bottom_right_radius,
+            &item.border_bottom_left_radius,
+        ];
+        for radius in radii {
+            radius.set(LogicalLength::new(4.));
+        }
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 clip=rrect 0,0 100x50 r4\n  Container 0,0 10x10\n"
+        );
+
+        // The border takes up part of the radius.
+        item.border_width.set(LogicalLength::new(2.));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 clip=rrect 2,2 96x46 r2\n  Container 0,0 10x10\n"
+        );
+
+        item.border_top_left_radius.set(LogicalLength::new(10.));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50 clip=path\n  Container 0,0 10x10\n");
+
+        // Back to the inset clip, then to none.
+        for radius in radii {
+            radius.set(LogicalLength::new(0.));
+        }
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 clip=inset(2,2,2,2)\n  Container 0,0 10x10\n"
+        );
+        item.clip.set(false);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+    }
+
+    #[test]
+    fn a_resize_alone_updates_the_clip() {
+        use crate::lengths::LogicalLength;
+        use crate::testing::ClipTree;
+        let tree = ClipTree::new((100., 50.), 1);
+        let item = tree.rect(0);
+        item.clip.set(true);
+        item.border_width.set(LogicalLength::new(2.));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        let resized = LogicalRect::new(Default::default(), LogicalSize::new(200., 80.));
+
+        // The insets stay, since they're relative to the visual's size.
+        tree.geometry(0).set(resized);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 200x80 clip=inset(2,2,2,2)\n  Container 0,0 10x10\n"
+        );
+
+        // A rounded clip has a size of its own.
+        item.border_top_left_radius.set(LogicalLength::new(6.));
+        item.border_top_right_radius.set(LogicalLength::new(6.));
+        item.border_bottom_right_radius.set(LogicalLength::new(6.));
+        item.border_bottom_left_radius.set(LogicalLength::new(6.));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 200x80 clip=rrect 2,2 196x76 r4\n  Container 0,0 10x10\n"
+        );
+        tree.geometry(0).set(LogicalRect::new(Default::default(), LogicalSize::new(100., 50.)));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 clip=rrect 2,2 96x46 r4\n  Container 0,0 10x10\n"
+        );
+    }
+
+    /// The transform of the first top-level visual.
+    fn transform_of_first(visuals: &VisualTree) -> Matrix4x4 {
+        let first = (&visuals.root.Children().unwrap()).into_iter().next().unwrap();
+        first.TransformMatrix().unwrap()
+    }
+
+    /// Where `m` maps the point `(x, y)`, rounded to 4 decimals. The matrix multiplies row
+    /// vectors.
+    fn map_point(m: Matrix4x4, x: f32, y: f32) -> (f32, f32) {
+        let round = |v: f32| (v * 1e4).round() / 1e4 + 0.;
+        (round(x * m.M11 + y * m.M21 + m.M41), round(x * m.M12 + y * m.M22 + m.M42))
+    }
+
+    fn transform_tree(
+        rotation: f32,
+        scale: (f32, f32),
+        origin: (f32, f32),
+    ) -> (VisualTree, ItemTreeRc) {
+        use crate::api::LogicalPosition;
+        let tree = crate::testing::TransformTree::new((100., 50.), 1);
+        let item = tree.rect(0);
+        item.transform_rotation.set(rotation);
+        item.transform_scale_x.set(scale.0);
+        item.transform_scale_y.set(scale.1);
+        item.transform_origin.set(LogicalPosition::new(origin.0, origin.1));
+        // The child is a transform item too; this keeps it untransformed.
+        tree.rect(1).transform_scale_x.set(1.);
+        tree.rect(1).transform_scale_y.set(1.);
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        (visuals, dyn_tree)
+    }
+
+    #[test]
+    fn transforms_are_matrices_on_the_container() {
+        // Clockwise on screen: right turns into down.
+        let (visuals, _tree) = transform_tree(90., (1., 1.), (0., 0.));
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 transform=[0 1 -1 0 0 0]\n  Container 0,0 10x10\n"
+        );
+        assert_eq!(map_point(transform_of_first(&visuals), 1., 0.), (0., 1.));
+
+        let (visuals, _tree) = transform_tree(0., (2., 2.), (5., 5.));
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 transform=[2 0 0 2 -5 -5]\n  Container 0,0 10x10\n"
+        );
+        // The origin stays where it is.
+        assert_eq!(map_point(transform_of_first(&visuals), 5., 5.), (5., 5.));
+        assert_eq!(map_point(transform_of_first(&visuals), 6., 5.), (7., 5.));
+
+        let (visuals, _tree) = transform_tree(90., (1., 1.), (5., 5.));
+        assert_eq!(map_point(transform_of_first(&visuals), 5., 5.), (5., 5.));
+        assert_eq!(map_point(transform_of_first(&visuals), 6., 5.), (5., 6.));
+    }
+
+    #[test]
+    fn transforms_rotate_before_they_scale() {
+        let (visuals, _tree) = transform_tree(90., (2., 1.), (0., 0.));
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 transform=[0 1 -2 0 0 0]\n  Container 0,0 10x10\n"
+        );
+        let m = transform_of_first(&visuals);
+        assert_eq!(map_point(m, 1., 0.), (0., 1.));
+        // Rotated to (-1, 1), then scaled to (-2, 1); scaling first would give (-1, 2).
+        assert_eq!(map_point(m, 1., 1.), (-2., 1.));
+    }
+
+    #[test]
+    fn the_identity_transform_leaves_the_matrix_alone() {
+        let (mut visuals, tree) = transform_tree(0., (1., 1.), (5., 5.));
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+        assert_eq!(transform_of_first(&visuals), IDENTITY);
+
+        // Back to the identity after a transform.
+        let item = ItemRc::new(tree.clone(), 0);
+        let item = ItemRef::downcast_pin::<crate::items::Transform>(item.borrow()).unwrap();
+        item.transform_scale_x.set(3.);
+        sync(&mut visuals, &tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50 transform=[3 0 0 1 -10 0]\n  Container 0,0 10x10\n"
+        );
+        item.transform_scale_x.set(1.);
+        sync(&mut visuals, &tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+        assert_eq!(transform_of_first(&visuals), IDENTITY);
+    }
+
+    #[test]
+    fn layers_are_plain_containers() {
+        let tree = crate::testing::LayerTree::new((100., 50.), 1);
+        tree.rect(0).cache_rendering_hint.set(true);
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n  Container 0,0 10x10\n");
+    }
+
+    #[test]
+    fn a_new_kind_of_visual_keeps_the_clip_and_transform() {
+        let c = compositor();
+        let mut visual = c.CreateContainerVisual().unwrap();
+        let mut kind = VisualKind::Container;
+        let mut update = VisualUpdate { compositor: &c, visual: &mut visual, kind: &mut kind };
+        let size = LogicalSize::new(30., 20.);
+        update.transform(90., 1., 1., LogicalPoint::default());
+        update.clip(size, Some((LogicalRect::from_size(size), Default::default())));
+        let _ = update.sprite();
+        let mut out = alloc::string::String::new();
+        dump_visual(&visual, 0, &mut out);
+        assert_eq!(out, "Sprite 0,0 0x0 clip=inset(0,0,0,0) transform=[0 1 -1 0 0 0]\n");
     }
 }

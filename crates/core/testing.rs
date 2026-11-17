@@ -16,7 +16,9 @@ impl crate::platform::Platform for NoWindowPlatform {
     }
 }
 
-pub(crate) use fixture_trees::{BorderTree, RectTree};
+pub(crate) use fixture_trees::{
+    BorderTree, ClipTree, LayerTree, OpacityTree, RectTree, TransformTree,
+};
 
 /// Item trees in the shape generated code has: a root item with a row of child items.
 mod fixture_trees {
@@ -30,7 +32,9 @@ mod fixture_trees {
         IndexRange, ItemTree, ItemTreeNode, ItemTreeVTable, ItemTreeWeak, ItemVisitorVTable,
         ItemWeak, TraversalOrder, VisitChildrenResult,
     };
-    use crate::items::{AccessibleRole, BorderRectangle, ItemVTable, Rectangle};
+    use crate::items::{
+        AccessibleRole, BorderRectangle, Clip, ItemVTable, Layer, Opacity, Rectangle, Transform,
+    };
     use crate::layout::{LayoutInfo, Orientation};
     use crate::lengths::LogicalRect;
     use crate::slice::Slice;
@@ -199,4 +203,8 @@ mod fixture_trees {
 
     fixture_tree!(RectTree, Rectangle, RECT_TREE_VT);
     fixture_tree!(BorderTree, BorderRectangle, BORDER_TREE_VT);
+    fixture_tree!(ClipTree, Clip, CLIP_TREE_VT);
+    fixture_tree!(OpacityTree, Opacity, OPACITY_TREE_VT);
+    fixture_tree!(LayerTree, Layer, LAYER_TREE_VT);
+    fixture_tree!(TransformTree, Transform, TRANSFORM_TREE_VT);
 }
