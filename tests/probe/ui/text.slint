@@ -3,7 +3,7 @@
 // Text, StyledText and TextInput, drawn through parley and Direct2D.
 export component Text inherits Window {
     width: 360px;
-    height: 330px;
+    height: 420px;
     background: #ffffff;
 
     in property <string> greeting: "Hello, Slint テキスト Agyj 0123";
@@ -66,6 +66,35 @@ export component Text inherits Window {
                 text: "Editable 日本語";
                 font-size: 14px;
                 selection-background-color: #a0c0ff;
+            }
+        }
+
+        Rectangle {
+            height: 30px;
+            border-width: 1px;
+            border-color: #808080;
+
+            TextInput {
+                x: 4px;
+                width: parent.width - 8px;
+                vertical-alignment: center;
+                text: "Second input";
+                font-size: 14px;
+            }
+        }
+
+        Rectangle {
+            height: 30px;
+            border-width: 1px;
+            border-color: #808080;
+
+            TextInput {
+                x: 4px;
+                width: parent.width - 8px;
+                vertical-alignment: center;
+                input-type: password;
+                text: "secret";
+                font-size: 14px;
             }
         }
 

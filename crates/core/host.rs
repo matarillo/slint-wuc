@@ -48,6 +48,7 @@ use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, w};
 
+mod ime;
 mod input;
 mod keyboard;
 #[doc(hidden)]
@@ -511,6 +512,7 @@ pub struct Win32WindowAdapter {
     window_move_requests: Cell<usize>,
     /// Only kept for detached windows: real ones hand the requests to the input method.
     ime_requests: RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>>,
+    ime: ime::Ime,
 }
 
 impl Win32WindowAdapter {
@@ -548,6 +550,7 @@ impl Win32WindowAdapter {
             cursor_request: Default::default(),
             window_move_requests: Cell::new(0),
             ime_requests: Default::default(),
+            ime: Default::default(),
         }))
     }
 
@@ -637,6 +640,7 @@ impl Win32WindowAdapter {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, Weak::into_raw(self.self_weak.clone()) as isize)
         };
         self.hwnd.set(Some(hwnd));
+        ime::window_created(hwnd);
         let renderer = &self.renderer;
         let compositor = renderer.tree.borrow().compositor().clone();
         let interop: ICompositorDesktopInterop = compositor.cast().map_err(err)?;
@@ -922,9 +926,10 @@ impl WindowAdapterInternal for Win32WindowAdapter {
     }
 
     fn input_method_request(&self, request: crate::window::InputMethodRequest) {
-        // The input method comes with Phase 4.
         if self.detached {
             self.ime_requests.borrow_mut().push(request);
+        } else if let Some(hwnd) = self.hwnd.get() {
+            ime::request(self, hwnd, &request);
         }
     }
 
@@ -969,6 +974,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         return result;
     }
     if let Some(result) = keyboard::handle(&adapter, hwnd, msg, wp, lp) {
+        return result;
+    }
+    if let Some(result) = ime::handle(&adapter, hwnd, msg, wp, lp) {
         return result;
     }
     match msg {

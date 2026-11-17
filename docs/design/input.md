@@ -75,8 +75,27 @@ Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is th
 - `WM_ACTIVATE` dispatches `WindowActiveChanged`; on activation, `release_modifiers_not_held` with the modifiers `GetKeyState` reports.
 - Posting a key down and its key up to the queue together (`PostMessage`) puts the `WM_CHAR` behind the key up, where the key down can't find it,
   and the text arrives a second time as `WM_CHAR`. A real keyboard, `SendInput` and a pump that posts one message at a time don't.
-- Input methods are Phase 4, with text input.
-  Until then the text an input method commits arrives as `WM_CHAR`, and types like `SendInput` text.
+- An input method's key downs (`VK_PROCESSKEY`) give no event; the text comes through the input method's messages below.
+
+## Input Method
+
+IMM32, as winit uses it on Windows ([S4](spike-s4-text.md)).
+The code is `crates/core/host/ime.rs`; the rest of the host only calls its `window_created`, `request` and `handle`, so TSF can replace it (for reconversion, which upstream lacks too).
+
+- A new window has no input context (`ImmAssociateContextEx` with none), as in winit: typing goes to `WM_CHAR` until a text input asks for the input method.
+- `InputMethodRequest::Enable` gives the window the default context, and `Disable` takes it away.
+  A password input is treated as `Disable`, as Windows' own password edit controls take no input method text (winit ignores the purpose on Windows).
+- `Enable` and `Update` carry the caret rectangle in logical window coordinates.
+  It becomes physical client pixels for `ImmSetCandidateWindow` (`CFS_EXCLUDE`: the list opens below the caret and never covers it) and `ImmSetCompositionWindow` (`CFS_POINT`, for input methods that draw their own window).
+- `WM_IME_SETCONTEXT` clears `ISC_SHOWUICOMPOSITIONWINDOW`: the text input draws the composition inline, as upstream's renderers do with the preedit text.
+- `WM_IME_COMPOSITION` becomes one key event:
+  - with a result (`GCS_RESULTSTR`), `CommitComposition` with the result as text, and the new composition, if any, as preedit text;
+  - otherwise `UpdateComposition` with the composition (`GCS_COMPSTR`) as preedit text; an empty one clears the preedit text.
+  - The preedit selection is the clause being converted (`GCS_COMPATTR`, `ATTR_TARGET_*`), or else an empty range at `GCS_CURSORPOS`, in UTF-8 bytes, as winit computes it.
+  - The message doesn't go to `DefWindowProc`, which would send the result again as `WM_IME_CHAR`.
+- `WM_IME_ENDCOMPOSITION` without a result (Escape, or every character deleted) clears the preedit text.
+- When the focus leaves a text input in the middle of a composition, the text input drops its preedit text, and `Disable` cancels the composition (`CPS_CANCEL`).
+  Committing it instead would put the text into the input that gets the focus next.
 
 ## Clipboard
 
