@@ -22,14 +22,14 @@ item tree のノードを Composition の `Visual` に対応させ、プロパ�
 |---|---|
 | 残す (ほぼ無改造) | `properties*` `callbacks` `model*` `layout` `item_tree` `item_focus` `input` `animations*` `timers` `string` `sharedvector` `slice` `lengths` `graphics/{color,brush,border_radius,path}` `menus` `accessibility` `translations` `styled_text` `data_transfer` `component_factory` `rtti` `api` (公開型) |
 | 作り替える | `items*` (`render` を Visual 更新に置換)、`window*` (`WindowInner` は維持し、ホストを直結)、`context` (イベントループ直結)、`graphics/image` (デコードは維持、描画先をサーフェスに) |
-| 捨てる | `renderer` `item_rendering` (`ItemRenderer`) `partial_renderer` `platform` (`Platform` トレイト) `textlayout*` `font_collection` (parley/fontique) `graphics/{wgpu_*,bitmapfont,boxshadowcache,rendering_metrics_collector}` `unsafe_single_threaded`、no_std / wasm / 他 OS の `cfg`、`slint_int_coord`、`internal/backends/*`、`internal/renderers/*` |
+| 捨てる | `renderer` の描画系メソッド (`Renderer` トレイト自体はフォント登録とテキスト計測の継ぎ目として残す。Phase 0 で変更、`docs/design/compat-contract.md`) `item_rendering` (`ItemRenderer`) `partial_renderer` `platform` (`Platform` トレイト。`WindowEvent` 等の型は残す) `textlayout*` `font_collection` (parley/fontique) `graphics/{wgpu_*,bitmapfont,boxshadowcache,rendering_metrics_collector}` `unsafe_single_threaded`、no_std / wasm / 他 OS の `cfg`、`slint_int_coord`、`internal/backends/*`、`internal/renderers/*` |
 | 新設 | `host/` (Win32 メッセージループ、HWND、DPI)、`composition/` (Compositor、グラフィックスデバイス、サーフェス)、`visual_tree/` (同期エンジン)、`text/` (DirectWrite)、`testing` (ヘッドレス検証) |
 
 ### ビジュアルツリー同期エンジン (中核設計)
 
 - **対応関係**: 1 item = 1 Visual を基本とする。`SpriteVisual` / `ShapeVisual` は `ContainerVisual` の派生なので、子 item の Visual を直接ぶら下げる。
 - **状態の置き場**: items 構造体の `cached_rendering_data` フィールドは残し、ウィンドウごとの Visual ノード表へのハンドル (index + generation) に転用する。構造体に COM オブジェクトを持たせない。
-- **差分更新**: ノードごとに `PropertyTracker::new_with_dirty_handler` (`properties.rs:1451`) を持ち、dirty 通知でウィンドウの dirty キューに積む。同期パスは dirty ノードだけを再評価する (全走査しない)。ジオメトリ用 (`ItemTreeVTable::item_geometry`) と内容用の 2 トラッカーに分け、移動だけならサーフェス再描画を避ける。
+- **差分更新**: 上流の `PartialRenderer::compute_dirty_regions` と同じく、ウィンドウのトラッカーが dirty のときだけ木を走査し、ノードごとの内容トラッカーとジオメトリ比較で変化した Visual だけを更新する。構造変化 (リピーター等) も走査で拾える。走査コストが Phase 2 の計測で約 1 ms を超えたら、dirty キュー方式に切り替える。(Phase 0 で変更。詳細は `docs/design/visual-tree.md`)
 - **`ItemVTable`**: `render` スロットを `update_visual` に置換する。items が Composition API を直接呼ぶ (抽象層なし)。
 - **構造変化**: `register_item_tree` / `unregister_item_tree` (`item_tree.rs:215,235`) と `ensure_instantiated` をフックし、親ノードを「子リスト dirty」にして Visual の子コレクションを突き合わせる。z 順は `visit_item_tree_z_sorted` の順序に従う。
 - **フレーム駆動**: アニメーション中のみティックし、アイドル時は CPU ゼロ。Slint のプロパティアニメーションは UI スレッドのティックで駆動する (Composition アニメーションへの委譲は将来の最適化)。
