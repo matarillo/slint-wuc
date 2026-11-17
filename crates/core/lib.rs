@@ -33,6 +33,7 @@ pub mod debug_log;
 pub mod font_collection;
 pub mod future;
 pub mod graphics;
+pub mod host;
 pub mod input;
 pub mod item_focus;
 pub mod item_rendering;
@@ -58,6 +59,7 @@ mod testing;
 pub mod textlayout;
 pub mod timers;
 pub mod translations;
+pub mod visual_tree;
 pub mod window;
 
 #[doc(inline)]

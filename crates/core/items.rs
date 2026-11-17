@@ -68,9 +68,8 @@ mod path;
 pub use path::*;
 pub mod system_tray;
 
-/// Alias for `&mut dyn ItemRenderer`. Required so cbindgen generates the ItemVTable
-/// despite the presence of trait object
-type ItemRendererRef<'a> = &'a mut dyn crate::item_rendering::ItemRenderer;
+/// Alias so cbindgen treats the visual update as an opaque type in the ItemVTable.
+type VisualUpdateRef<'a> = crate::visual_tree::VisualUpdate<'a>;
 
 /// Workarounds for cbindgen
 pub type VoidArg = ();
@@ -110,9 +109,7 @@ macro_rules! declare_item_vtable {
     };
 }
 
-/// Returned by the `render()` function on items to indicate whether the rendering of
-/// children should be handled by the caller, of if the item took care of that (for example
-/// through layer indirection)
+/// Returned by `update_visual()` to say whether the sync pass continues into the item's children.
 #[repr(C)]
 #[derive(Default)]
 pub enum RenderingResult {
@@ -200,10 +197,13 @@ pub struct ItemVTable {
         self_rc: &ItemRc,
     ) -> KeyEventResult,
 
-    pub render: extern "C" fn(
+    /// Brings the item's visual up to date with the item's properties. The sync pass calls it
+    /// inside a property tracker, so it runs again when a property it read changes. The visual's
+    /// offset and size already match the item's geometry; `size` is that geometry's size.
+    pub update_visual: extern "C" fn(
         core::pin::Pin<VRef<ItemVTable>>,
-        backend: &mut ItemRendererRef,
         self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
         size: LogicalSize,
     ) -> RenderingResult,
 
@@ -293,12 +293,13 @@ impl Item for Empty {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
+    fn update_visual(
         self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
         _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
         _size: LogicalSize,
     ) -> RenderingResult {
+        visual.plain();
         RenderingResult::ContinueRenderingChildren
     }
 
@@ -399,13 +400,13 @@ impl Item for Rectangle {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
+    fn update_visual(
         self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        _size: LogicalSize,
     ) -> RenderingResult {
-        (*backend).draw_rectangle(self, self_rc, size, &self.cached_rendering_data);
+        visual.fill(&self.background());
         RenderingResult::ContinueRenderingChildren
     }
 
@@ -514,14 +515,14 @@ impl Item for BasicBorderRectangle {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_border_rectangle(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 2): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -642,14 +643,14 @@ impl Item for BorderRectangle {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_border_rectangle(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 2): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -806,13 +807,14 @@ impl Item for Clip {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).visit_clip(self, self_rc, size)
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 2): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -925,13 +927,14 @@ impl Item for Opacity {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        backend.visit_opacity(self, self_rc, size)
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 2): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1060,13 +1063,14 @@ impl Item for Layer {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        backend.visit_layer(self, self_rc, size)
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 2): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1169,18 +1173,14 @@ impl Item for Transform {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        let origin = self.transform_origin().to_euclid().to_vector();
-        (*backend).translate(origin);
-        (*backend).scale(self.transform_scale_x(), self.transform_scale_y());
-        (*backend).rotate(self.transform_rotation());
-        (*backend).translate(-origin);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 2): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1353,18 +1353,14 @@ impl Item for WindowItem {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
+    fn update_visual(
         self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
+        _self_rc: &ItemRc,
+        visual: &mut VisualUpdateRef,
+        _size: LogicalSize,
     ) -> RenderingResult {
-        if self_rc.parent_item(crate::item_tree::ParentItemTraversalMode::StopAtPopups).is_none() {
-            backend.draw_window_background(self, self_rc, size, &self.cached_rendering_data);
-        } else {
-            // Dialogs and other nested Window items
-            backend.draw_rectangle(self, self_rc, size, &self.cached_rendering_data);
-        }
+        // The window's own background, and that of nested windows such as dialogs.
+        visual.fill(&self.background());
         RenderingResult::ContinueRenderingChildren
     }
 
@@ -1661,13 +1657,14 @@ impl Item for ContextMenu {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1850,14 +1847,14 @@ impl Item for BoxShadow {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_box_shadow(self, self_rc, size);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 5): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1980,14 +1977,14 @@ impl Item for BackdropBlur {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_backdrop_blur(self, self_rc, size);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 5): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -2183,13 +2180,14 @@ impl Item for TooltipArea {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

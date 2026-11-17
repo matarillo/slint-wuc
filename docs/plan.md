@@ -22,7 +22,7 @@ item tree のノードを Composition の `Visual` に対応させ、プロパ�
 |---|---|
 | 残す (ほぼ無改造) | `properties*` `callbacks` `model*` `layout` `item_tree` `item_focus` `input` `animations*` `timers` `string` `sharedvector` `slice` `lengths` `graphics/{color,brush,border_radius,path}` `menus` `accessibility` `translations` `styled_text` `data_transfer` `component_factory` `rtti` `api` (公開型) |
 | 作り替える | `items*` (`render` を Visual 更新に置換)、`window*` (`WindowInner` は維持し、ホストを直結)、`context` (イベントループ直結)、`graphics/image` (デコードは維持、描画先をサーフェスに) |
-| 捨てる | `renderer` の描画系メソッド (`Renderer` トレイト自体はフォント登録とテキスト計測の継ぎ目として残す。Phase 0 で変更、`docs/design/compat-contract.md`) `item_rendering` (`ItemRenderer`) `partial_renderer` `platform` (`Platform` トレイト。`WindowEvent` 等の型は残す) `textlayout*` `font_collection` (parley/fontique) `graphics/{wgpu_*,bitmapfont,boxshadowcache,rendering_metrics_collector}` `unsafe_single_threaded`、no_std / wasm / 他 OS の `cfg`、`slint_int_coord`、`internal/backends/*`、`internal/renderers/*` |
+| 捨てる | `renderer` の描画系メソッド (`Renderer` トレイト自体はフォント登録とテキスト計測の継ぎ目として残す。Phase 0 で変更、`docs/design/compat-contract.md`) `item_rendering` (`ItemRenderer`) `partial_renderer` `platform` (`Platform` トレイトは公開 API から外し、コア内部の継ぎ目として残す。Phase 1 で変更。`WindowEvent` 等の型は残す) `textlayout*` `font_collection` (parley/fontique) `graphics/{wgpu_*,bitmapfont,boxshadowcache,rendering_metrics_collector}` `unsafe_single_threaded`、no_std / wasm / 他 OS の `cfg`、`slint_int_coord`、`internal/backends/*`、`internal/renderers/*` |
 | 新設 | `host/` (Win32 メッセージループ、HWND、DPI)、`composition/` (Compositor、グラフィックスデバイス、サーフェス)、`visual_tree/` (同期エンジン)、`text/` (DirectWrite)、`testing` (ヘッドレス検証) |
 
 ### ビジュアルツリー同期エンジン (中核設計)
@@ -147,6 +147,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Opus] IME 統合 (TSF か IMM32) と `InputMethodRequest` の接続。
 - [Sonnet] `items/text.rs`・`items/input_items.rs` の呼び出し箇所の置換、SimpleText / ComplexText、StyledTextItem の実装。
 - [Sonnet] TextInput (キャレット、選択、アンドゥ)、TextInputInterface、text 系テストの移植。
+- [Sonnet] parley/fontique/swash のテキスト基盤 (`textlayout*`、`font_collection`) と、それが依存する `ItemRenderer` / `Render*` トレイトの削除 (Phase 1 では計測のために残した)。
 - **ゲート** [Opus]: 上流 `tests/cases` の text 系が通る。日本語 IME の手動チェックリストを満たす。
 
 ### Phase 5 — 画像・パス・エフェクト (Sonnet 中心、基盤は Opus)

@@ -9,13 +9,12 @@ Lookup the [`crate::items`] module documentation.
 */
 use super::{
     ImageFit, ImageHorizontalAlignment, ImageRendering, ImageTiling, ImageVerticalAlignment, Item,
-    ItemConsts, ItemRc, RenderingResult,
+    ItemConsts, ItemRc,
 };
 use crate::input::{
     FocusEvent, FocusEventResult, InputEventFilterResult, InputEventResult, InternalKeyEvent,
     KeyEventResult, MouseEvent,
 };
-use crate::item_rendering::ItemRenderer;
 use crate::item_rendering::{CachedRenderingData, RenderImage};
 use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{LogicalLength, LogicalRect, LogicalSize};
@@ -128,14 +127,14 @@ impl Item for ImageItem {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut &mut dyn ItemRenderer,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_image(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 5): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -300,14 +299,14 @@ impl Item for ClippedImage {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut &mut dyn ItemRenderer,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_image(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 5): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

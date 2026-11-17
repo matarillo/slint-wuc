@@ -3,7 +3,7 @@
 
 use super::{
     BuiltInMouseCursor, DragAction, DragActionArg, DropEvent, Item, ItemConsts, ItemRc,
-    PointerEventButton, RenderingResult,
+    PointerEventButton,
 };
 use crate::Coord;
 use crate::cursor::MouseCursorInner;
@@ -13,7 +13,7 @@ use crate::input::{
     FocusEvent, FocusEventResult, InputEventFilterResult, InputEventResult, InternalKeyEvent,
     KeyEventResult, KeyboardModifiers, MouseEvent,
 };
-use crate::item_rendering::{CachedRenderingData, ItemRenderer};
+use crate::item_rendering::CachedRenderingData;
 use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{LogicalPoint, LogicalRect, LogicalSize};
 #[cfg(feature = "rtti")]
@@ -219,13 +219,14 @@ impl Item for DragArea {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _: &mut &mut dyn ItemRenderer,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -393,13 +394,14 @@ impl Item for DropArea {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _: &mut &mut dyn ItemRenderer,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

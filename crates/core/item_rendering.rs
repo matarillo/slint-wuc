@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 #![warn(missing_docs)]
-//! module for rendering the tree of items
+//! Accessor traits that describe items to text layout and hit testing, and the per-item cache.
+//!
+//! `ItemRenderer` stays until the text stack is replaced (Phase 4): the parley text drawing
+//! code is written against it. Nothing calls it.
 
 use super::items::*;
 use crate::graphics::{
@@ -14,7 +17,7 @@ use crate::lengths::{
     LogicalBorderRadius, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector,
     PhysicalBorderRadius, PhysicalPx, ScaleFactor, SizeLengths,
 };
-pub use crate::partial_renderer::CachedRenderingData;
+pub use crate::visual_tree::CachedRenderingData;
 use crate::window::WindowAdapterRc;
 use crate::{Brush, SharedString};
 use alloc::boxed::Box;
@@ -233,74 +236,6 @@ impl<T> ItemCache<T> {
             &mut map.get_mut(&component).unwrap().get_mut(&index).unwrap().data
         })
     }
-}
-
-/// Renders the children of the item with the specified index into the renderer.
-pub fn render_item_children(
-    renderer: &mut dyn ItemRenderer,
-    component: &ItemTreeRc,
-    index: isize,
-    window_adapter: &WindowAdapterRc,
-) {
-    let mut actual_visitor =
-        |component: &ItemTreeRc, index: u32, item: Pin<ItemRef>| -> VisitChildrenResult {
-            renderer.save_state();
-            let item_rc = ItemRc::new(component.clone(), index);
-
-            let (do_draw, item_origin, item_size) = renderer.filter_item(&item_rc, window_adapter);
-
-            renderer.translate(item_origin.to_vector());
-
-            // Don't render items that are clipped, with the exception of the Clip or Flickable since
-            // they themselves clip their content.
-            let render_result = if renderer.global_alpha_transparent() {
-                // apply_opacity only multiplies, so the whole subtree stays transparent.
-                RenderingResult::ContinueRenderingWithoutChildren
-            } else if do_draw
-               || item.as_ref().clips_children()
-               // HACK, the geometry of the box shadow does not include the shadow, because when the shadow is the root for repeated elements it would translate the children
-               || ItemRef::downcast_pin::<BoxShadow>(item).is_some()
-               // Transform and Opacity should also be applied regardless if the item itself is clipped or not
-               || ItemRef::downcast_pin::<Transform>(item).is_some()
-               || ItemRef::downcast_pin::<Opacity>(item).is_some()
-               || ItemRef::downcast_pin::<Layer>(item).is_some()
-            {
-                let size = item_size.unwrap_or_else(|| {
-                    crate::properties::evaluate_no_tracking(|| item_rc.geometry()).size
-                });
-                item.as_ref().render(&mut (renderer as &mut dyn ItemRenderer), &item_rc, size)
-            } else {
-                RenderingResult::ContinueRenderingChildren
-            };
-
-            if matches!(render_result, RenderingResult::ContinueRenderingChildren) {
-                render_item_children(renderer, component, index as isize, window_adapter);
-            }
-            renderer.restore_state();
-            VisitChildrenResult::CONTINUE
-        };
-    vtable::new_vref!(let mut actual_visitor : VRefMut<ItemVisitorVTable> for ItemVisitor = &mut actual_visitor);
-    VRc::borrow_pin(component).as_ref().visit_children_item(
-        index,
-        crate::item_tree::TraversalOrder::BackToFront,
-        actual_visitor,
-    );
-}
-
-/// Renders the tree of items that component holds, using the specified renderer. Rendering is done
-/// relative to the specified origin.
-pub fn render_component_items(
-    component: &ItemTreeRc,
-    renderer: &mut dyn ItemRenderer,
-    origin: LogicalPoint,
-    window_adapter: &WindowAdapterRc,
-) {
-    renderer.save_state();
-    renderer.translate(origin.to_vector());
-
-    render_item_children(renderer, component, -1, window_adapter);
-
-    renderer.restore_state();
 }
 
 /// Compute the bounding rect of all children. This does /not/ include item's own bounding rect. Remember to run this
@@ -859,82 +794,6 @@ pub trait ItemRenderer {
 
     /// Return the internal renderer
     fn as_any(&mut self) -> Option<&mut dyn core::any::Any>;
-}
-
-/// Renderer-backend hooks for [`Layer::render`], which owns the caching and
-/// bounds computation; implementors only describe how to allocate, render
-/// into, and unwrap a layer target.
-///
-/// The `'cache` lifetime lets `layer_cache` hand out a reference that doesn't
-/// borrow `self`, so the orchestrator can call the other `&mut self` methods.
-pub trait LayerRenderer<'cache>: ItemRenderer {
-    /// Per-layer render target (for example a skia `Surface` or a reused GPU texture).
-    type LayerTarget;
-    /// Cached image type produced from rendering into a [`Self::LayerTarget`].
-    type Image: Clone;
-
-    /// Access the renderer's layer cache.
-    fn layer_cache(
-        &self,
-    ) -> &'cache ItemCache<Option<(euclid::Point2D<f32, crate::lengths::PhysicalPx>, Self::Image)>>;
-
-    /// Allocate a target of the given physical size; `None` aborts rendering.
-    fn create_layer_target(
-        &mut self,
-        item_rc: &ItemRc,
-        physical_size: euclid::Size2D<f32, crate::lengths::PhysicalPx>,
-    ) -> Option<Self::LayerTarget>;
-
-    /// Redirect rendering into `target`, translate so children are positioned
-    /// relative to `bounding_rect.origin`, call `render_item_children`, then
-    /// restore. The dance is backend-specific (sub-renderer vs. render-target
-    /// swap), hence the hook.
-    fn render_into_layer(
-        &mut self,
-        target: Self::LayerTarget,
-        item_rc: &ItemRc,
-        bounding_rect: LogicalRect,
-    ) -> Self::Image;
-}
-
-/// Render the children of a [`Layer`] item through the given [`LayerRenderer`] backend.
-pub fn render_layer<'cache, R>(
-    renderer: &mut R,
-    item_rc: &ItemRc,
-) -> Option<(euclid::Point2D<f32, crate::lengths::PhysicalPx>, R::Image)>
-where
-    R: LayerRenderer<'cache> + ?Sized + 'cache,
-{
-    let cache = renderer.layer_cache();
-    let scale_factor = renderer.scale_factor();
-
-    let compute_bounds = |r: &R| -> LogicalRect {
-        item_children_bounding_rect(item_rc, &r.window().window_adapter())
-            .intersection(
-                &r.get_current_clip().union(&LogicalRect::from_size(item_rc.geometry().size)),
-            )
-            .unwrap_or_default()
-    };
-
-    cache.get_or_update_cache_entry(item_rc, || {
-        // Don't track dependencies of the bounding rect here: the actual
-        // rendering below will track them as it walks the children.
-        let bounding_rect = crate::properties::evaluate_no_tracking(|| compute_bounds(renderer));
-        let physical_origin = bounding_rect.origin.cast() * scale_factor;
-        let layer_size = bounding_rect.size.cast() * scale_factor;
-
-        let Some(target) = renderer.create_layer_target(item_rc, layer_size) else {
-            // Target allocation failed (typically a zero-sized layer). The
-            // children never ran, so their dependencies weren't tracked.
-            // Re-invoke the bounds closure with tracking enabled so the
-            // layer re-renders when the size becomes non-zero.
-            let _ = compute_bounds(renderer);
-            return None;
-        };
-
-        let image = renderer.render_into_layer(target, item_rc, bounding_rect);
-        Some((physical_origin, image))
-    })
 }
 
 /// Helper trait to express the features of an item renderer.

@@ -753,6 +753,8 @@ dependencies = [
  "unicode-segmentation",
  "vtable",
  "windows",
+ "windows-future",
+ "windows-numerics",
 ]
 
 [[package]]

@@ -472,8 +472,7 @@ impl SlintContext {
         self.platform_context().acquire_keepalive();
     }
 
-    pub fn set_xdg_app_id(&self, _app_id: crate::SharedString) {
-    }
+    pub fn set_xdg_app_id(&self, _app_id: crate::SharedString) {}
 
     pub fn xdg_app_id(&self) -> Option<crate::SharedString> {
         None

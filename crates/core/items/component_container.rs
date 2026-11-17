@@ -7,7 +7,7 @@ This module contains the builtin `ComponentContainer` and related items
 When adding an item or a property, it needs to be kept in sync with different place.
 Lookup the [`crate::items`] module documentation.
 */
-use super::{Item, ItemConsts, ItemRc, RenderingResult};
+use super::{Item, ItemConsts, ItemRc};
 use crate::Coord;
 use crate::component_factory::{ComponentFactory, FactoryContext};
 use crate::input::{
@@ -18,7 +18,7 @@ use crate::item_rendering::{CachedRenderingData, RenderRectangle};
 use crate::item_tree::{IndexRange, ItemTreeRc, ItemTreeWeak, ItemWeak};
 use crate::item_tree::{ItemTreeNode, ItemVisitorVTable, TraversalOrder, VisitChildrenResult};
 use crate::layout::{LayoutInfo, Orientation};
-use crate::lengths::{LogicalLength, LogicalRect, LogicalSize};
+use crate::lengths::{LogicalLength, LogicalRect};
 use crate::properties::{Property, PropertyTracker};
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
@@ -247,14 +247,14 @@ impl Item for ComponentContainer {
         KeyEventResult::EventIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut super::ItemRendererRef,
-        item_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        backend.draw_rectangle(self, item_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

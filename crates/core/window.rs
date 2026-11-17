@@ -1932,11 +1932,11 @@ impl WindowInner {
 
                 if let Some(adapter) = self.window_adapter_weak.upgrade() {
                     if !old_popup_region.is_empty() {
-                        adapter.renderer().mark_dirty_region(old_popup_region.into());
+                        adapter.renderer().mark_dirty_region(old_popup_region);
                     }
 
                     if !new_popup_region.is_empty() {
-                        adapter.renderer().mark_dirty_region(new_popup_region.into());
+                        adapter.renderer().mark_dirty_region(new_popup_region);
                     }
                     adapter.request_redraw();
                 }
@@ -1955,21 +1955,15 @@ impl WindowInner {
         }
     }
 
-    /// Calls the render_components to render the main component and any sub-window components, tracked by a
-    /// property dependency tracker.
-    ///
-    /// The closure also receives a `post_render` callback. The renderer must invoke it
-    /// once with its `ItemRenderer` after walking the components but before flushing,
-    /// so the runtime can draw overlays that sit on top of the scene without being part
-    /// of any item tree.
+    /// Runs a sync pass: `sync` brings the window's visuals up to date with the main item tree,
+    /// then the popups shown inside the window and the overlays, each with its origin. It runs
+    /// inside the window's redraw tracker, so a later change to anything it read requests the
+    /// next pass.
     ///
     /// Returns None if no component is set yet.
-    pub fn draw_contents<T>(
+    pub fn sync_visuals<T>(
         &self,
-        render_components: impl FnOnce(
-            &[(ItemTreeWeak, LogicalPoint)],
-            &dyn Fn(&mut dyn crate::item_rendering::ItemRenderer),
-        ) -> T,
+        sync: impl FnOnce(&[(ItemTreeWeak, LogicalPoint)]) -> T,
     ) -> Option<T> {
         crate::properties::evaluate_no_tracking(|| self.ensure_tree_instantiated());
         #[cfg(feature = "shared-parley")]
@@ -1981,39 +1975,25 @@ impl WindowInner {
             ctx.font_context().borrow_mut().begin_frame();
         }
         let component_weak = ItemTreeRc::downgrade(&self.try_component()?);
-        let post_render = |renderer: &mut dyn crate::item_rendering::ItemRenderer| {
-            Self::render_image_overlay(&self.drag_image_overlay, renderer);
-            Self::render_image_overlay(&self.cursor_image_overlay, renderer);
-        };
-        let render = || {
-            let has_child_popup = self
-                .active_popups
-                .borrow()
-                .iter()
-                .any(|popup| matches!(popup.location, PopupWindowLocation::ChildWindow(..)));
-            let has_overlay = !self.overlays.borrow().is_empty();
-            if !has_child_popup && !has_overlay {
-                render_components(&[(component_weak, LogicalPoint::default())], &post_render)
-            } else {
-                let active_popups = self.active_popups.borrow();
-                let overlays = self.overlays.borrow();
-                let mut item_trees = Vec::with_capacity(active_popups.len() + overlays.len() + 1);
-                item_trees.push((component_weak, LogicalPoint::default()));
-                for popup in active_popups.iter() {
-                    // If the popup is not a real window and does not have its own coordinate system.
-                    // We have to draw the popup and consider the location for subelements because everything must
-                    // be rendered relative to the main window position
-                    if let PopupWindowLocation::ChildWindow(location) = &popup.location {
-                        item_trees.push((ItemTreeRc::downgrade(&popup.component), *location));
-                    }
+        // TODO(phase 6): the drag image and cursor image overlays.
+        let run = || {
+            let active_popups = self.active_popups.borrow();
+            let overlays = self.overlays.borrow();
+            let mut item_trees = Vec::with_capacity(active_popups.len() + overlays.len() + 1);
+            item_trees.push((component_weak, LogicalPoint::default()));
+            for popup in active_popups.iter() {
+                // Popups without their own window share the main window's visuals, at their
+                // location.
+                if let PopupWindowLocation::ChildWindow(location) = &popup.location {
+                    item_trees.push((ItemTreeRc::downgrade(&popup.component), *location));
                 }
-                for overlay in overlays.iter() {
-                    item_trees.push((ItemTreeRc::downgrade(overlay), LogicalPoint::zero()));
-                }
-                drop(overlays);
-                drop(active_popups);
-                render_components(&item_trees, &post_render)
             }
+            for overlay in overlays.iter() {
+                item_trees.push((ItemTreeRc::downgrade(overlay), LogicalPoint::zero()));
+            }
+            drop(overlays);
+            drop(active_popups);
+            sync(&item_trees)
         };
         let (result, has_active_animations) =
             crate::animations::CURRENT_ANIMATION_DRIVER.with(|driver| {
@@ -2022,14 +2002,15 @@ impl WindowInner {
                         .as_ref()
                         .project_ref()
                         .redraw_tracker
-                        .evaluate_as_dependency_root(render)
+                        .evaluate_as_dependency_root(run)
                 })
             });
         self.has_active_animations.set(has_active_animations);
         Some(result)
     }
 
-    pub(crate) fn has_active_animations(&self) -> bool {
+    /// Whether the last sync pass found a running animation, so the host keeps ticking frames.
+    pub fn has_active_animations(&self) -> bool {
         self.has_active_animations.get()
             || crate::animations::CURRENT_ANIMATION_DRIVER
                 .with(|driver| driver.has_active_animations())
@@ -2052,20 +2033,9 @@ impl WindowInner {
         let old_rect = overlay.replace(new).map(|old| old.rect);
         let window_adapter = self.window_adapter();
         for rect in old_rect.into_iter().chain(new_rect) {
-            window_adapter.renderer().mark_dirty_region(rect.into());
+            window_adapter.renderer().mark_dirty_region(rect);
         }
         window_adapter.request_redraw();
-    }
-
-    fn render_image_overlay(
-        overlay: &RefCell<Option<ImageOverlay>>,
-        item_renderer: &mut dyn crate::item_rendering::ItemRenderer,
-    ) {
-        let Some(overlay) = overlay.borrow().clone() else { return };
-        item_renderer.save_state();
-        item_renderer.translate(overlay.rect.origin.to_vector());
-        item_renderer.draw_image_direct(overlay.image);
-        item_renderer.restore_state();
     }
 
     /// The source `DragArea`'s `drag-image` under the pointer, while a drag is in flight and
@@ -2434,7 +2404,7 @@ impl WindowInner {
 
                 if !popup_region.is_empty() {
                     let window_adapter = self.window_adapter();
-                    window_adapter.renderer().mark_dirty_region(popup_region.into());
+                    window_adapter.renderer().mark_dirty_region(popup_region);
                     window_adapter.request_redraw();
                 }
             }
@@ -2560,7 +2530,7 @@ impl WindowInner {
         let window_adapter = self.window_adapter();
         let size = window_adapter.size().to_logical(self.scale_factor()).to_euclid();
         if !size.is_empty() {
-            window_adapter.renderer().mark_dirty_region(LogicalRect::from_size(size).into());
+            window_adapter.renderer().mark_dirty_region(LogicalRect::from_size(size));
         }
         window_adapter.request_redraw();
     }

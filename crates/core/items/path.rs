@@ -8,9 +8,7 @@ When adding an item or a property, it needs to be kept in sync with different pl
 Lookup the [`crate::items`] module documentation.
 */
 
-use super::{
-    FillRule, Item, ItemConsts, ItemRc, ItemRendererRef, LineCap, LineJoin, RenderingResult,
-};
+use super::{FillRule, Item, ItemConsts, ItemRc, LineCap, LineJoin};
 use crate::graphics::{Brush, FittedPath, PathData, PathDataIterator};
 use crate::input::{
     FocusEvent, FocusEventResult, InputEventFilterResult, InputEventResult, InternalKeyEvent,
@@ -20,10 +18,7 @@ use crate::item_rendering::CachedRenderingData;
 
 use crate::items::ImageFit;
 use crate::layout::{LayoutInfo, Orientation};
-use crate::lengths::{
-    LogicalBorderRadius, LogicalLength, LogicalPx, LogicalRect, LogicalSize, LogicalVector,
-    RectLengths,
-};
+use crate::lengths::{LogicalLength, LogicalPx, LogicalRect, LogicalVector, RectLengths};
 use crate::once_box::OnceBox;
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
@@ -126,22 +121,14 @@ impl Item for Path {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        let clip = self.clip();
-        if clip {
-            (*backend).save_state();
-            (*backend).combine_clip(size.into(), LogicalBorderRadius::zero());
-        }
-        (*backend).draw_path(self, self_rc, size);
-        if clip {
-            (*backend).restore_state();
-        }
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 5): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

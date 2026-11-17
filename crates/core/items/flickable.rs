@@ -6,10 +6,7 @@
 
 //! The `Flickable` item
 
-use super::{
-    Item, ItemConsts, ItemRc, ItemRendererRef, KeyEventResult, PointerEventButton, RenderingResult,
-    VoidArg,
-};
+use super::{Item, ItemConsts, ItemRc, KeyEventResult, PointerEventButton, VoidArg};
 use crate::animations::Instant;
 use crate::animations::simulations::rubber_band;
 use crate::animations::simulations::spring::SpringPhysicalParameters;
@@ -28,8 +25,7 @@ use crate::items::flickable::velocity_tracker::GeneralVelocityTracker;
 use crate::items::flickable::velocity_tracker::{Velocity, VelocityTracker as _};
 use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{
-    LogicalBorderRadius, LogicalLength, LogicalPoint, LogicalRect, LogicalSize, LogicalVector,
-    PointLengths, RectLengths,
+    LogicalLength, LogicalPoint, LogicalRect, LogicalVector, PointLengths, RectLengths,
 };
 use crate::once_box::OnceBox;
 #[cfg(feature = "rtti")]
@@ -239,17 +235,14 @@ impl Item for Flickable {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).combine_clip(
-            LogicalRect::new(LogicalPoint::default(), size),
-            LogicalBorderRadius::zero(),
-        );
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 3): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

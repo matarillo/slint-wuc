@@ -1102,29 +1102,20 @@ mod weak_handle {
 
     impl<T: StrongHandle> Default for Weak<T> {
         fn default() -> Self {
-            Self {
-                inner: T::WeakInner::default(),
-                thread: std::thread::current().id(),
-            }
+            Self { inner: T::WeakInner::default(), thread: std::thread::current().id() }
         }
     }
 
     impl<T: StrongHandle> Clone for Weak<T> {
         fn clone(&self) -> Self {
-            Self {
-                inner: self.inner.clone(),
-                thread: self.thread,
-            }
+            Self { inner: self.inner.clone(), thread: self.thread }
         }
     }
 
     impl<T: StrongHandle> Weak<T> {
         #[doc(hidden)]
         pub fn new(inner: T::WeakInner) -> Self {
-            Self {
-                inner,
-                thread: std::thread::current().id(),
-            }
+            Self { inner, thread: std::thread::current().id() }
         }
 
         /// Returns a new strongly referenced component if some other instance still

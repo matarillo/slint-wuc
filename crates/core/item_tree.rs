@@ -3255,7 +3255,7 @@ mod tests {
             window_adapter
                 .window
                 .0
-                .draw_contents(|components, _| {
+                .sync_visuals(|components| {
                     components
                         .iter()
                         .map(|(component, _)| component.upgrade().unwrap())

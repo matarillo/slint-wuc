@@ -33,7 +33,7 @@ Each upstream item falls into one of three classes:
 | `renderer::Renderer` / `RendererSealed`, reached through `WindowAdapter::renderer()` | generated code (`register_font_from_path`, `register_font_from_memory`, `register_bitmap_font`, `rust.rs:5160-5180`), items (`text_size`, `char_size`, `font_metrics`, `text_content_widths`, `text_line_height`, text-input hit testing), interpreter (`free_graphics_resources`, font registration) | one struct backed by DirectWrite and the window's node table |
 | `ItemVTable` | core, interpreter (through `rtti`), C++ headers | same slots, except `render` becomes `update_visual` (see below) |
 | `platform` module | `api::Window::dispatch_event*` (`WindowEvent`, `WindowEventDispatchResult`), `items/text.rs` (`Clipboard`), `api.rs`/`future.rs`/`context.rs` (`EventLoopProxy`, `SetPlatformError`) | keeps those types and `update_timers_and_animations` / `duration_until_next_timer_update` |
-| `SlintContext` | generated code (§1.5), builtin functions | holds a concrete `host::Platform` instead of `Box<dyn Platform>` |
+| `SlintContext` | generated code (§1.5), builtin functions | holds `Box<dyn Platform>`; `host::Platform` is the only production implementation (see the rules below) |
 | `slint::private_unstable_api` | generated code | the fork's facade crate; `ensure_context` creates the fork's context, `native_widgets` is empty |
 
 Rules for seams:
@@ -42,13 +42,16 @@ Rules for seams:
   Drawing methods, `text_layout_cache`, and `set_rendering_notifier` go.
 - `ItemVTable::render` (which takes `&mut ItemRendererRef`) is replaced by `update_visual`.
   No generated code calls `render`; the C++ headers are regenerated from the fork, so the slot change is invisible to generated C++.
-- The `Platform` trait and `set_platform` go.
-  Its services become methods of `host::Platform`: the animation clock (`animations.rs:241`), click, long-press, and cursor-blink intervals (`input.rs:1406`, `items.rs:1626`, `window.rs:1562`), clipboard, `open_url` (`lib.rs:215`), and the event loop.
+- The `Platform` trait leaves the public API, but stays inside core as a seam (decided in Phase 1).
+  `host::Platform` implements it: the animation clock (`animations.rs:241`), click and cursor-blink intervals (`input.rs:1406`, `window.rs:1562`), clipboard, `open_url` (`lib.rs:215`), and the event loop.
+  The only other implementations are unit-test doubles, which need their own clock and event-loop proxy; replacing the trait with a concrete type would have meant rewriting those tests for no gain at the generated-code boundary.
+  Host-only operations (frame ticks) don't go through the trait.
+- Long-press was Android-only upstream and went with Stage 1 pruning; touch long-press comes back with `WM_POINTER` input in Phase 3.
 - `PlatformError::SetPlatformError` stays as a variant so matches in user code still compile.
 
 ## Drop
 
-- `item_rendering::ItemRenderer` and the `Render*` traits, `partial_renderer` (except the re-export above), `textlayout`, `font_collection`, the parley/fontique/swash font stack, `graphics::{wgpu_*, bitmapfont, boxshadowcache, rendering_metrics_collector}`, `unsafe_single_threaded`, no_std, wasm, and other operating systems.
+- `item_rendering::ItemRenderer` and the `Render*` traits (they stay, uncalled, until Phase 4: the parley text code is written against them), `partial_renderer` (except the re-export above and a `DirtyRegion` alias for `mark_dirty_region`), `textlayout`, `font_collection`, the parley/fontique/swash font stack, `graphics::{wgpu_*, bitmapfont, boxshadowcache, rendering_metrics_collector}`, `unsafe_single_threaded`, no_std, wasm, and other operating systems.
 - Public API: `slint::platform` except the types under Seams, the renderer modules, `BackendSelector`, `android`, `wgpu_*`, `winit_030`, `fontique_012`, `BorrowedOpenGLTexture*`.
 - Stubs that keep source compatibility: `Window::set_rendering_notifier` returns `Err(SetRenderingNotifierError::Unsupported)`; `GraphicsAPI` and friends stay as types; `set_xdg_app_id` does nothing.
 - `register_bitmap_font` returns an error: bitmap fonts are an MCU feature.

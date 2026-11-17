@@ -15,9 +15,9 @@ use crate::input::{
     KeyEventResult, MouseEvent,
 };
 use crate::item_rendering::CachedRenderingData;
-use crate::items::{ColorScheme, Item, ItemConsts, ItemRc, Orientation, RenderingResult, VoidArg};
+use crate::items::{ColorScheme, Item, ItemConsts, ItemRc, Orientation, VoidArg};
 use crate::layout::LayoutInfo;
-use crate::lengths::{LogicalRect, LogicalSize};
+use crate::lengths::LogicalRect;
 use crate::once_box::OnceBox;
 #[cfg(feature = "rtti")]
 use crate::rtti::*;
@@ -406,13 +406,14 @@ impl Item for SystemTrayIcon {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut &mut dyn crate::item_rendering::ItemRenderer,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

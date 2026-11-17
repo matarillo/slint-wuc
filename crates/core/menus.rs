@@ -306,13 +306,14 @@ impl crate::items::Item for MenuItem {
         Default::default()
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut &mut dyn crate::item_rendering::ItemRenderer,
-        _self_rc: &ItemRc,
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
         _size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        Default::default()
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

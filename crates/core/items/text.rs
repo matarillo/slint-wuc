@@ -10,9 +10,9 @@ Lookup the [`crate::items`] module documentation.
 */
 use super::{
     EventResult, FontMetrics, InputMethodHints, InputType, Item, ItemConsts, ItemRc, ItemRef,
-    KeyEventArg, KeyEventResult, KeyEventType, PointArg, PointerEventButton, RenderingResult,
-    StringArg, TextHorizontalAlignment, TextOverflow, TextStrokeStyle, TextVerticalAlignment,
-    TextWrap, VoidArg,
+    KeyEventArg, KeyEventResult, KeyEventType, PointArg, PointerEventButton, StringArg,
+    TextHorizontalAlignment, TextOverflow, TextStrokeStyle, TextVerticalAlignment, TextWrap,
+    VoidArg,
 };
 use crate::graphics::{Brush, Color, FontRequest};
 use crate::input::{
@@ -20,8 +20,8 @@ use crate::input::{
     InternalKeyEvent, KeyboardModifiers, MouseEvent, StandardShortcut, TextShortcut, key_codes,
 };
 use crate::item_rendering::{
-    CachedRenderingData, HasFont, ItemRenderer, PlainOrStyledText, RenderString, RenderText,
-    TextForWidth, resolve_line_height_factor,
+    CachedRenderingData, HasFont, PlainOrStyledText, RenderString, RenderText, TextForWidth,
+    resolve_line_height_factor,
 };
 use crate::layout::{LayoutInfo, Orientation};
 use crate::lengths::{LogicalLength, LogicalPoint, LogicalRect, LogicalSize};
@@ -135,14 +135,14 @@ impl Item for ComplexText {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut &mut dyn ItemRenderer,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_text(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 4): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -479,14 +479,14 @@ impl Item for StyledTextItem {
         }
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut &mut dyn ItemRenderer,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_text(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 4): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -872,14 +872,14 @@ impl Item for SimpleText {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut &mut dyn ItemRenderer,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        (*backend).draw_text(self, self_rc, size, &self.cached_rendering_data);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 4): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1612,24 +1612,14 @@ impl Item for TextInput {
         FocusEventResult::FocusAccepted
     }
 
-    fn render(
-        self: Pin<&Self>,
-        backend: &mut &mut dyn ItemRenderer,
-        self_rc: &ItemRc,
-        size: LogicalSize,
-    ) -> RenderingResult {
-        crate::properties::evaluate_no_tracking(|| {
-            if self.has_focus() && self.text() != *backend.window().last_ime_text.borrow() {
-                let window_adapter = &backend.window().window_adapter();
-                if let Some(w) = window_adapter.internal(crate::InternalToken) {
-                    w.input_method_request(InputMethodRequest::Update(
-                        self.ime_properties(window_adapter, self_rc),
-                    ));
-                }
-            }
-        });
-        (*backend).draw_text_input(self, self_rc, size);
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // TODO(phase 4): not shown yet.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(

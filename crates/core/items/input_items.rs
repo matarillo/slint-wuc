@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 use super::{
-    EventResult, FocusReasonArg, Item, ItemConsts, ItemRc, ItemRendererRef, KeyEventArg,
-    PointerEvent, PointerEventArg, PointerEventButton, PointerEventKind, PointerScrollEvent,
-    PointerScrollEventArg, RenderingResult, VoidArg,
+    EventResult, FocusReasonArg, Item, ItemConsts, ItemRc, KeyEventArg, PointerEvent,
+    PointerEventArg, PointerEventButton, PointerEventKind, PointerScrollEvent,
+    PointerScrollEventArg, VoidArg,
 };
 use crate::api::LogicalPosition;
 use crate::input::{
@@ -250,13 +250,14 @@ impl Item for TouchArea {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -391,13 +392,14 @@ impl Item for WindowMoveArea {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -494,13 +496,14 @@ impl Item for KeyBinding {
         Default::default()
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut &mut dyn crate::item_rendering::ItemRenderer,
-        _self_rc: &ItemRc,
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
         _size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        Default::default()
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -771,13 +774,14 @@ impl Item for FocusScope {
         FocusEventResult::FocusAccepted
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -979,13 +983,14 @@ impl Item for SwipeGestureHandler {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
@@ -1207,13 +1212,14 @@ impl Item for ScaleRotateGestureHandler {
         FocusEventResult::FocusIgnored
     }
 
-    fn render(
-        self: Pin<&Self>,
-        _backend: &mut ItemRendererRef,
-        _self_rc: &ItemRc,
-        _size: LogicalSize,
-    ) -> RenderingResult {
-        RenderingResult::ContinueRenderingChildren
+    fn update_visual(
+        self: core::pin::Pin<&Self>,
+        _self_rc: &crate::items::ItemRc,
+        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        _size: crate::lengths::LogicalSize,
+    ) -> crate::items::RenderingResult {
+        // Shows nothing; only its children have visuals.
+        crate::items::RenderingResult::ContinueRenderingChildren
     }
 
     fn bounding_rect(
