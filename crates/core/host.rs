@@ -378,6 +378,12 @@ pub struct Win32WindowAdapter {
     requested_size: Cell<Option<WindowSize>>,
     /// Whether someone set the size: `set_size`, or the preferred size of the layout.
     size_set: Cell<bool>,
+    /// The client size in logical pixels that `set_size` or the user asked for.
+    /// A DPI change keeps it, instead of what rounding the physical size gives.
+    logical_size: Cell<Option<LogicalSize>>,
+    /// Set while `WM_DPICHANGED` resizes the window, whose `WM_SIZE` keeps `logical_size`.
+    in_dpi_change: Cell<bool>,
+    constraints: Cell<crate::window::LayoutConstraints>,
     /// The title, kept for when the HWND is created.
     title: RefCell<HSTRING>,
     sync_pending: Cell<bool>,
@@ -408,6 +414,9 @@ impl Win32WindowAdapter {
             size: Cell::new(PhysicalSize::new(800, 600)),
             requested_size: Cell::new(None),
             size_set: Cell::new(false),
+            logical_size: Cell::new(None),
+            in_dpi_change: Cell::new(false),
+            constraints: Cell::new(Default::default()),
             title: RefCell::new(HSTRING::new()),
             sync_pending: Cell::new(false),
             visible: Cell::new(false),
@@ -508,15 +517,33 @@ impl Win32WindowAdapter {
         *self.target.borrow_mut() = Some(target);
         let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
         self.scale_factor_changed(scale);
-        let mut rc = RECT::default();
-        unsafe {
-            let _ = GetClientRect(hwnd, &mut rc);
-        }
-        self.resized(PhysicalSize::new(rc.right as u32, rc.bottom as u32));
-        if let Some(size) = self.requested_size.take() {
-            self.set_size(size);
+        // The window was created for the system DPI; a requested size applies again at the
+        // window's own DPI.
+        match self.requested_size.take() {
+            Some(size) => self.set_size(size),
+            None => self.resized(client_size(hwnd)),
         }
         Ok(hwnd)
+    }
+
+    /// The window's DPI, or the one its scale factor stands for while it has no HWND.
+    fn dpi(&self) -> u32 {
+        match self.hwnd.get() {
+            Some(hwnd) => unsafe { GetDpiForWindow(hwnd) },
+            None => (self.window.scale_factor() * 96.0).round() as u32,
+        }
+    }
+
+    /// The window rectangle size for a client of `client` physical pixels at `dpi`.
+    fn frame_size(&self, hwnd: HWND, client: PhysicalSize, dpi: u32) -> (i32, i32) {
+        let mut rc =
+            RECT { left: 0, top: 0, right: client.width as i32, bottom: client.height as i32 };
+        unsafe {
+            let style = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
+            let ex_style = WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32);
+            let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, dpi);
+        }
+        (rc.right - rc.left, rc.bottom - rc.top)
     }
 
     fn scale_factor_changed(&self, scale: f32) {
@@ -595,7 +622,16 @@ impl WindowAdapter for Win32WindowAdapter {
 
     fn set_size(&self, requested: WindowSize) {
         self.size_set.set(true);
-        let size = requested.to_physical(self.window.scale_factor());
+        let size = match requested {
+            WindowSize::Logical(logical) => {
+                self.logical_size.set(Some(logical));
+                to_physical(logical, self.dpi())
+            }
+            WindowSize::Physical(physical) => {
+                self.logical_size.set(Some(physical.to_logical(self.window.scale_factor())));
+                physical
+            }
+        };
         let Some(hwnd) = self.hwnd.get() else {
             if !self.detached {
                 self.requested_size.set(Some(requested));
@@ -604,24 +640,15 @@ impl WindowAdapter for Win32WindowAdapter {
             self.resized(size);
             return;
         };
+        let (width, height) = self.frame_size(hwnd, size, self.dpi());
         unsafe {
-            let mut rc =
-                RECT { left: 0, top: 0, right: size.width as i32, bottom: size.height as i32 };
-            let style = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
-            let _ = AdjustWindowRectExForDpi(
-                &mut rc,
-                style,
-                false,
-                WS_EX_NOREDIRECTIONBITMAP,
-                GetDpiForWindow(hwnd),
-            );
             let _ = SetWindowPos(
                 hwnd,
                 None,
                 0,
                 0,
-                rc.right - rc.left,
-                rc.bottom - rc.top,
+                width,
+                height,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
             );
         }
@@ -658,6 +685,7 @@ impl WindowAdapter for Win32WindowAdapter {
         }
 
         let constraints = properties.layout_constraints();
+        self.constraints.set(constraints);
         let current = self.size.get().to_logical(self.window.scale_factor());
         // Without a size of its own, the window takes the layout's preferred size;
         // an axis the layout has no preference for keeps the default.
@@ -721,25 +749,66 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         WM_SIZE if wp.0 != SIZE_MINIMIZED as usize => {
-            let (w, h) = ((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
-            adapter.resized(PhysicalSize::new(w, h));
+            let size = PhysicalSize::new((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
+            // A size that the intended logical size doesn't explain comes from the user.
+            let intended = adapter.logical_size.get().map(|l| to_physical(l, adapter.dpi()));
+            if !adapter.in_dpi_change.get() && intended != Some(size) {
+                adapter.logical_size.set(Some(size.to_logical(adapter.window.scale_factor())));
+            }
+            adapter.resized(size);
             LRESULT(0)
+        }
+        WM_GETDPISCALEDSIZE => {
+            // Without an answer, Windows scales the window rectangle linearly. The frame
+            // doesn't scale linearly, so the logical client size would drift.
+            let Some(logical) = adapter.logical_size.get() else { return LRESULT(0) };
+            if unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() } {
+                return LRESULT(0);
+            }
+            let dpi = (wp.0 & 0xffff) as u32;
+            let (width, height) = adapter.frame_size(hwnd, to_physical(logical, dpi), dpi);
+            // SAFETY: WM_GETDPISCALEDSIZE's lParam points to the proposed window size.
+            let proposed = unsafe { &mut *(lp.0 as *mut SIZE) };
+            proposed.cx = width;
+            proposed.cy = height;
+            LRESULT(1)
         }
         WM_DPICHANGED => {
             let scale = (wp.0 & 0xffff) as f32 / 96.0;
+            adapter.in_dpi_change.set(true);
             adapter.scale_factor_changed(scale);
             // SAFETY: WM_DPICHANGED's lParam points to the suggested window rectangle.
-            let r = unsafe { *(lp.0 as *const RECT) };
-            unsafe {
-                let _ = SetWindowPos(
-                    hwnd,
-                    None,
-                    r.left,
-                    r.top,
-                    r.right - r.left,
-                    r.bottom - r.top,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
+            if let Some(r) = unsafe { (lp.0 as *const RECT).as_ref() } {
+                unsafe {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        None,
+                        r.left,
+                        r.top,
+                        r.right - r.left,
+                        r.bottom - r.top,
+                        SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                }
+            }
+            // `SetWindowPos` sends no WM_SIZE when the physical size stays the same, and the
+            // logical size must follow the new scale anyway.
+            adapter.resized(client_size(hwnd));
+            adapter.in_dpi_change.set(false);
+            LRESULT(0)
+        }
+        WM_GETMINMAXINFO => {
+            let constraints = adapter.constraints.get();
+            let dpi = adapter.dpi();
+            // SAFETY: WM_GETMINMAXINFO's lParam points to the MINMAXINFO to fill.
+            let info = unsafe { &mut *(lp.0 as *mut MINMAXINFO) };
+            if let Some(min) = constraints.min {
+                let (w, h) = adapter.frame_size(hwnd, to_physical(min, dpi), dpi);
+                info.ptMinTrackSize = POINT { x: w, y: h };
+            }
+            if let Some(max) = constraints.max {
+                let (w, h) = adapter.frame_size(hwnd, to_physical(max, dpi), dpi);
+                info.ptMaxTrackSize = POINT { x: w, y: h };
             }
             LRESULT(0)
         }
@@ -749,6 +818,21 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
     }
+}
+
+/// `size` in physical pixels at `dpi`, rounded to the nearest pixel.
+fn to_physical(size: LogicalSize, dpi: u32) -> PhysicalSize {
+    let scale = dpi as f64 / 96.0;
+    let px = |v: f32| (v as f64 * scale).round().clamp(0.0, (i32::MAX / 2) as f64) as u32;
+    PhysicalSize::new(px(size.width), px(size.height))
+}
+
+fn client_size(hwnd: HWND) -> PhysicalSize {
+    let mut rc = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut rc);
+    }
+    PhysicalSize::new(rc.right as u32, rc.bottom as u32)
 }
 
 /// The one implementation of the renderer seam: the window's visual tree, plus the text
@@ -859,5 +943,79 @@ mod tests {
         );
         let dpi = unsafe { GetDpiForWindow(host.hwnd.get().unwrap()) } as f32;
         assert_eq!(host.root_visual().Scale().unwrap().X, dpi / 96.);
+    }
+
+    #[test]
+    #[ignore = "opens a window on the desktop"]
+    fn dpi_changes_keep_the_logical_size() {
+        use crate::api::LogicalSize;
+        let ctx = crate::SlintContext::new(Box::new(Platform::new().unwrap()));
+        let adapter = ctx.create_window_adapter().unwrap();
+        let tree = RectTree::new((100., 50.), 0);
+        WindowInner::from_pub(adapter.window()).set_component(&vtable::VRc::into_dyn(tree.clone()));
+        // Odd sizes, which a fractional scale factor doesn't map to whole pixels.
+        adapter.window().set_size(LogicalSize::new(401., 301.));
+        adapter.window().show().unwrap();
+        let host = Win32WindowAdapter::from_window(adapter.window()).unwrap();
+        let hwnd = host.hwnd.get().unwrap();
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        let item_size = || {
+            let window = adapter.window();
+            let size = window.size().to_logical(window.scale_factor());
+            (size.width, size.height)
+        };
+
+        // Created at the system DPI, the window ends up at its own, rounded to whole pixels.
+        assert_eq!(client_size(hwnd), to_physical(LogicalSize::new(401., 301.), dpi));
+
+        // Moving to a 150% monitor asks for the frame around 602x452 client pixels.
+        let mut proposed = SIZE::default();
+        let answered = unsafe {
+            SendMessageW(
+                hwnd,
+                WM_GETDPISCALEDSIZE,
+                Some(WPARAM(144)),
+                Some(LPARAM(&mut proposed as *mut SIZE as isize)),
+            )
+        };
+        assert_eq!(answered, LRESULT(1));
+        assert_eq!(
+            (proposed.cx, proposed.cy),
+            host.frame_size(hwnd, PhysicalSize::new(602, 452), 144)
+        );
+
+        // A DPI change whose suggested rectangle keeps the physical size still moves the
+        // logical size to the new scale, and keeps the intended one.
+        let mut rect = RECT::default();
+        unsafe { GetWindowRect(hwnd, &mut rect).unwrap() };
+        let physical = client_size(hwnd);
+        let send_dpi_changed = |dpi: u32| unsafe {
+            SendMessageW(
+                hwnd,
+                WM_DPICHANGED,
+                Some(WPARAM(((dpi << 16) | dpi) as usize)),
+                Some(LPARAM(&rect as *const RECT as isize)),
+            )
+        };
+        send_dpi_changed(144);
+        assert_eq!(client_size(hwnd), physical);
+        assert_eq!(item_size(), (physical.width as f32 / 1.5, physical.height as f32 / 1.5));
+        assert_eq!(host.logical_size.get(), Some(LogicalSize::new(401., 301.)));
+
+        send_dpi_changed(dpi);
+        let scale = dpi as f32 / 96.;
+        assert_eq!(item_size(), (physical.width as f32 / scale, physical.height as f32 / scale));
+        adapter.window().hide().unwrap();
+    }
+
+    #[test]
+    fn logical_sizes_round_to_the_nearest_pixel() {
+        use crate::api::LogicalSize;
+        // Truncating gave 601, 503 and 701.
+        assert_eq!(to_physical(LogicalSize::new(401., 403.), 144), PhysicalSize::new(602, 605));
+        assert_eq!(to_physical(LogicalSize::new(403., 401.), 120), PhysicalSize::new(504, 501));
+        assert_eq!(to_physical(LogicalSize::new(401., 0.), 168), PhysicalSize::new(702, 0));
+        // f32 scale factors miss whole pixels at DPIs that aren't multiples of 3.
+        assert_eq!(to_physical(LogicalSize::new(480., 96.), 97), PhysicalSize::new(485, 97));
     }
 }
