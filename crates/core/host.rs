@@ -42,6 +42,8 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, w};
 
 mod input;
+#[doc(hidden)]
+pub mod pointer;
 
 const WM_APP_INVOKE: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
@@ -393,6 +395,7 @@ pub struct Win32WindowAdapter {
     sync_pending: Cell<bool>,
     visible: Cell<bool>,
     mouse: input::Mouse,
+    pointers: pointer::Pointers,
 }
 
 impl Win32WindowAdapter {
@@ -426,6 +429,7 @@ impl Win32WindowAdapter {
             sync_pending: Cell::new(false),
             visible: Cell::new(false),
             mouse: input::Mouse::new(),
+            pointers: Default::default(),
         }))
     }
 
@@ -538,6 +542,15 @@ impl Win32WindowAdapter {
         self.ensure_hwnd()
     }
 
+    /// Handles a touch or pen message as if `GetPointerInfo` had returned `message`:
+    /// tests can't make Windows report pointers without acting on the real screen.
+    #[doc(hidden)]
+    pub fn pointer_message_for_testing(&self, message: pointer::PointerMessage) {
+        if let Some(hwnd) = self.hwnd.get() {
+            pointer::dispatch(self, hwnd, message);
+        }
+    }
+
     /// A point in client pixels, in logical pixels.
     fn logical_point(&self, point: POINT) -> crate::lengths::LogicalPoint {
         let scale = self.window.scale_factor();
@@ -624,6 +637,7 @@ impl WindowAdapter for Win32WindowAdapter {
             self.sync();
         } else {
             self.mouse.reset();
+            self.pointers.reset();
         }
         Ok(())
     }
@@ -786,6 +800,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     };
     if let Some(result) = input::handle(&adapter, hwnd, msg, wp, lp) {
+        return result;
+    }
+    if let Some(result) = pointer::handle(&adapter, hwnd, msg, wp) {
         return result;
     }
     match msg {

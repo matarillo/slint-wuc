@@ -13,6 +13,12 @@ Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is th
   - Touch (`PT_TOUCH`) becomes `InternalEvent::Touch`, with finger ids handed out per pointer id while it's down,
     reused once lifted, as winit's `touch_finger_ids` does.
   - Pen (`PT_PEN`) becomes mouse events with the left button, or the right one while the barrel button is held.
+  - A cancelled contact (`POINTER_FLAG_CANCELED`, or `WM_POINTERCAPTURECHANGED`) ends the touch as `Cancelled`, and the pen's press as `Exit`.
+    The core treats a cancelled single finger as a release, as upstream does, so it can still click.
+  - Updates of a pointer that came down on another window are ignored.
+  - The code is `crates/core/host/pointer.rs`.
+    Tests can't make Windows report a pointer without acting on the real screen,
+    so `Win32WindowAdapter::pointer_message_for_testing` takes what `GetPointerInfo` would return.
 - Positions are client pixels divided by the window's scale factor: logical coordinates.
 - Presses and releases carry `click_count: 0`; the core counts clicks with the platform's `click_interval`.
 - On a press, `SetCapture`; on the release of the last button, `ReleaseCapture`.
