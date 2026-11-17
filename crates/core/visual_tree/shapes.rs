@@ -9,6 +9,7 @@
 #![allow(unsafe_code)]
 
 use crate::graphics::{Brush, GradientStop, ResolvedBrush, resolve_brush};
+use alloc::vec::Vec;
 use crate::lengths::{PhysicalBorderRadius, PhysicalPx, ScaleFactor};
 use windows::Graphics::IGeometrySource2D;
 use windows::UI::Composition::{
@@ -79,12 +80,53 @@ fn add_stops(
     stops: &CompositionColorGradientStopCollection,
     from: &[GradientStop],
 ) -> windows::core::Result<()> {
-    for stop in from {
-        stops.Append(
-            &c.CreateColorGradientStopWithOffsetAndColor(stop.position, ui_color(stop.color))?,
-        )?;
+    for (position, color) in premultiplied_stops(from) {
+        stops.Append(&c.CreateColorGradientStopWithOffsetAndColor(position, ui_color(color))?)?;
     }
     Ok(())
+}
+
+/// How many pieces a gradient segment between stops of different alpha is cut into.
+const ALPHA_STEPS: usize = 8;
+
+/// Stops that make the compositor's gradients, which interpolate straight colors, look like
+/// upstream's, which interpolate premultiplied colors (Skia's `InPremul::Yes`). The two differ
+/// between stops of different alpha: there, intermediate stops follow the premultiplied blend,
+/// and a transparent stop takes the color of the stop next to it on each side.
+fn premultiplied_stops(from: &[GradientStop]) -> Vec<(f32, crate::Color)> {
+    let rgba = |c: crate::Color| {
+        [c.red() as f32, c.green() as f32, c.blue() as f32, c.alpha() as f32 / 255.]
+    };
+    let color = |[r, g, b, a]: [f32; 4]| {
+        crate::Color::from_argb_u8((a * 255.).round() as u8, r.round() as u8, g.round() as u8, b.round() as u8)
+    };
+    let [first, ..] = from else { return Vec::new() };
+    if from.len() == 1 {
+        return alloc::vec![(first.position, first.color)];
+    }
+    let mut out = Vec::new();
+    for pair in from.windows(2) {
+        let (s0, s1) = (&pair[0], &pair[1]);
+        let (c0, c1) = (rgba(s0.color), rgba(s1.color));
+        // The color a transparent end takes.
+        let start = if c0[3] == 0. { [c1[0], c1[1], c1[2], 0.] } else { c0 };
+        let end = if c1[3] == 0. { [c0[0], c0[1], c0[2], 0.] } else { c1 };
+        out.push((s0.position, color(start)));
+        if c0[3] != c1[3] && s1.position > s0.position {
+            for k in 1..ALPHA_STEPS {
+                let t = k as f32 / ALPHA_STEPS as f32;
+                let (w0, w1) = (c0[3] * (1. - t), c1[3] * t);
+                let a = w0 + w1;
+                let mix = |i: usize| (c0[i] * w0 + c1[i] * w1) / a;
+                out.push((
+                    s0.position + (s1.position - s0.position) * t,
+                    color([mix(0), mix(1), mix(2), a]),
+                ));
+            }
+        }
+        out.push((s1.position, color(end)));
+    }
+    out
 }
 
 /// A rectangle with rounded corners. A uniform radius maps to the native rounded rectangle;
@@ -159,15 +201,22 @@ fn rounded_rect_path(
     unsafe {
         let path = factory.CreatePathGeometry()?;
         let sink = path.Open()?;
+        // An arc of radius 0 ends the figure where Composition reads it, so a square corner has
+        // none.
+        let corner = |x, y, r: f32| {
+            if r > 0. {
+                sink.AddArc(&arc(x, y, r));
+            }
+        };
         sink.BeginFigure(p(x0 + r.top_left, y0), D2D1_FIGURE_BEGIN_FILLED);
         sink.AddLine(p(x1 - r.top_right, y0));
-        sink.AddArc(&arc(x1, y0 + r.top_right, r.top_right));
+        corner(x1, y0 + r.top_right, r.top_right);
         sink.AddLine(p(x1, y1 - r.bottom_right));
-        sink.AddArc(&arc(x1 - r.bottom_right, y1, r.bottom_right));
+        corner(x1 - r.bottom_right, y1, r.bottom_right);
         sink.AddLine(p(x0 + r.bottom_left, y1));
-        sink.AddArc(&arc(x0, y1 - r.bottom_left, r.bottom_left));
+        corner(x0, y1 - r.bottom_left, r.bottom_left);
         sink.AddLine(p(x0, y0 + r.top_left));
-        sink.AddArc(&arc(x0 + r.top_left, y0, r.top_left));
+        corner(x0 + r.top_left, y0, r.top_left);
         sink.EndFigure(D2D1_FIGURE_END_CLOSED);
         sink.Close()?;
         path.cast()

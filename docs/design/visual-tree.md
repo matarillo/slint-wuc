@@ -57,7 +57,7 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 | --- | --- | --- |
 | `Empty`, `Layer` | `ContainerVisual` | nothing |
 | `Rectangle`, `WindowItem` | `SpriteVisual`, or a container when transparent | color brush, reused across color changes; gradient brushes with absolute mapping |
-| `BasicBorderRectangle`, `BorderRectangle` | `ShapeVisual`; a sprite without border and radius | a fill shape and a stroke shape laid out by upstream's `BorderRectLayout` |
+| `BasicBorderRectangle`, `BorderRectangle` | `ContainerVisual` with a floor `ShapeVisual`; a sprite without border and radius | a fill shape and a stroke shape laid out by upstream's `BorderRectLayout`; see [Antialiasing](#antialiasing) |
 | `Opacity` | `ContainerVisual` | `Opacity`, which is group opacity on a container (S2) |
 | `Clip` | `ContainerVisual` | `InsetClip`, or `CompositionGeometricClip` with a rounded rectangle or path |
 | `Transform` | `ContainerVisual` | `TransformMatrix` |
@@ -100,6 +100,22 @@ Only the drawing is new.
 - **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
 - **Not yet.** Conic gradients draw in their first color (Phase 5 brings them with the other surface drawing); clips with a radius clip to their rectangle; a text larger than 16384 pixels is cut off (virtual surfaces would lift that).
 
+### Antialiasing
+
+Upstream's Skia renderer antialiases rounded rectangles, clips with a radius, and everything under a rotation, and draws axis-aligned rectangles without.
+The compositor antialiases edges, clips and shapes only in `CompositionBorderMode::Soft`; the default `Hard` snaps them to pixels.
+
+- A `Transform` that rotates, a clip with a radius, and a rounded rectangle's shapes get `Soft`.
+  Everything else inherits, so it's `Hard` unless a rotation is above it.
+- Soft mode also antialiases the edges of the visual's own bounds.
+  Where a shape's edge lies on them, both apply and the edge comes out lighter than upstream's.
+  So a node's shapes are in a floor `ShapeVisual` that reaches 1 logical pixel past the item on each side, with the shapes offset by that margin.
+  Being below the children, the floor's border mode doesn't pass on to them.
+- An arc of radius 0 ends a Direct2D figure where Composition reads it, so a square corner of a per-corner rounded rectangle has no arc.
+
+Gradients interpolate straight colors in the compositor and premultiplied colors in upstream's renderers (Skia's `InPremul::Yes`).
+Between stops of different alpha, `shapes.rs` adds seven intermediate stops that follow the premultiplied blend, and gives a transparent stop the color of its neighbor on each side.
+
 ### Images
 
 `ImageItem` and `ClippedImage` place the image as upstream's Skia renderer does (`draw_image_impl`), with the effects of [S5](spike-s5-effects.md).
@@ -111,6 +127,7 @@ The code is in `visual_tree/image.rs`.
   Upstream draws images from a whole-pixel origin (`pixel_align_origin`), so the floor sprite has `IsPixelSnappingEnabled`.
   A single part's fractional offset goes into the brush transform and an inset clip, so that only the item's origin snaps.
   The brush itself doesn't snap: `SnapToPixels` would also round the fractional offsets inside a scaled part.
+  Tiles start at the part's offset cut to whole pixels, as upstream's `as i32` does.
 - **Raster.** A bitmap shows at its own size.
   An SVG is rasterized at `scalable_render_size`, which keeps its aspect ratio as `tiny_skia::IntSize::scale_to` does; the brush stretches it over the requested size, as upstream's renderers do.
 - **Surfaces.** One `CompositionDrawingSurface` per image's pixel data, raster size, and part, shared by the items that show it.

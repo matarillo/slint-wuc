@@ -22,7 +22,7 @@ use core::pin::Pin;
 use shapes::ui_color;
 use std::collections::HashSet;
 use windows::UI::Composition::{
-    CompositionClip, CompositionColorBrush, CompositionEffectBrush, Compositor, ContainerVisual,
+    CompositionBorderMode, CompositionClip, CompositionColorBrush, CompositionEffectBrush, Compositor, ContainerVisual,
     InsetClip, ShapeVisual, SpriteVisual,
 };
 use windows::core::Interface;
@@ -30,6 +30,16 @@ use windows_numerics::{Matrix4x4, Vector2, Vector3};
 
 /// The `TransformMatrix` of a visual that isn't transformed.
 const IDENTITY: Matrix4x4 = Matrix4x4::translation(0., 0., 0.);
+
+/// How far, in logical pixels, a node's shape visual reaches past the item on each side.
+const SHAPE_MARGIN: f32 = 1.;
+
+/// The border mode of a visual whose edges or clip aren't axis-aligned rectangles. The compositor
+/// antialiases edges only in `Soft` mode, and snaps them to pixels in the default `Hard` mode,
+/// which matches how upstream's renderers draw axis-aligned rectangles.
+fn soft_if(soft: bool) -> CompositionBorderMode {
+    if soft { CompositionBorderMode::Soft } else { CompositionBorderMode::Inherit }
+}
 
 /// Per-item handle into the window's [`VisualTree`]. Every item struct embeds one.
 ///
@@ -64,8 +74,9 @@ struct Node {
     children: Vec<usize>,
     /// Children collected during the current pass.
     next_children: Vec<usize>,
-    /// The sprite that shows the item's drawn content (text), below the children's visuals.
-    surface_sprite: Option<SpriteVisual>,
+    /// The visual of the item's own content, below the children's visuals: a sprite (text,
+    /// images, effects) or a shape visual.
+    floor: Option<ContainerVisual>,
     /// The pass that last visited this node.
     pass: u64,
     /// The parent node as of that pass; `None` for the root of an item tree.
@@ -77,7 +88,7 @@ pub struct VisualUpdate<'a> {
     compositor: &'a Compositor,
     visual: &'a mut ContainerVisual,
     kind: &'a mut VisualKind,
-    surface_sprite: &'a mut Option<SpriteVisual>,
+    floor: &'a mut Option<ContainerVisual>,
 }
 
 impl VisualUpdate<'_> {
@@ -100,10 +111,33 @@ impl VisualUpdate<'_> {
         self.visual.cast().unwrap()
     }
 
-    /// Makes the node a `ShapeVisual` and returns it.
-    pub fn shape(&mut self) -> ShapeVisual {
-        self.ensure_kind(VisualKind::Shape);
-        self.visual.cast().unwrap()
+    /// Makes the node a plain container with a `ShapeVisual` of `size` below its children, and
+    /// returns that and the offset of the node's origin in it.
+    ///
+    /// The compositor antialiases shapes only in soft border mode, which also antialiases the
+    /// edges of the shape visual's bounds: where a shape's edge lies on them, both apply and the
+    /// edge comes out lighter than upstream's. The shape visual reaches past the item by
+    /// [`SHAPE_MARGIN`] so that its bounds lie where nothing is drawn. Being below the children,
+    /// its border mode doesn't pass on to them.
+    pub fn shape(&mut self, size: LogicalSize) -> (ShapeVisual, Vector2) {
+        self.plain();
+        let shape = match self.floor.as_ref().and_then(|f| f.cast::<ShapeVisual>().ok()) {
+            Some(shape) => shape,
+            None => {
+                self.remove_floor();
+                let shape = self.compositor.CreateShapeVisual().unwrap();
+                let _ = shape.SetOffset(Vector3 { X: -SHAPE_MARGIN, Y: -SHAPE_MARGIN, Z: 0. });
+                let _ = self.visual.Children().and_then(|c| c.InsertAtBottom(&shape));
+                *self.floor = Some(shape.cast().unwrap());
+                shape
+            }
+        };
+        let size = size.cast::<f32>();
+        let _ = shape.SetSize(Vector2 {
+            X: size.width + 2. * SHAPE_MARGIN,
+            Y: size.height + 2. * SHAPE_MARGIN,
+        });
+        (shape, Vector2 { X: SHAPE_MARGIN, Y: SHAPE_MARGIN })
     }
 
     /// Makes the node a plain `ContainerVisual`, dropping any brush or shapes.
@@ -140,17 +174,22 @@ impl VisualUpdate<'_> {
             return;
         };
         if layout.border_width.get() <= 0. && layout.outer_radius.is_zero() {
+            self.remove_floor();
             self.fill(&rect.background(), size);
             return;
         }
         let c = self.compositor.clone();
-        let shapes = self.shape().Shapes().unwrap();
+        let (visual, origin) = self.shape(size);
+        // Upstream antialiases rounded rectangles, and others only when transformed.
+        let _ = visual.SetBorderMode(soft_if(!layout.outer_radius.is_zero()));
+        let shapes = visual.Shapes().unwrap();
         let _ = shapes.Clear();
         if let Some(brush) = shapes::make_brush(&c, &rect.background(), layout.brush_size)
             && let Ok(geometry) =
                 shapes::rounded_rect(&c, layout.background_rect, layout.background_radius)
         {
             let shape = c.CreateSpriteShapeWithGeometry(&geometry).unwrap();
+            let _ = shape.SetOffset(origin);
             let _ = shape.SetFillBrush(&brush);
             let _ = shapes.Append(&shape);
         }
@@ -159,6 +198,7 @@ impl VisualUpdate<'_> {
             && let Ok(geometry) = shapes::rounded_rect(&c, layout.border_rect, layout.border_radius)
         {
             let shape = c.CreateSpriteShapeWithGeometry(&geometry).unwrap();
+            let _ = shape.SetOffset(origin);
             let _ = shape.SetStrokeBrush(&brush);
             let _ = shape.SetStrokeThickness(layout.border_width.get());
             let _ = shapes.Append(&shape);
@@ -183,10 +223,12 @@ impl VisualUpdate<'_> {
         self.plain();
         let Some((rect, radius)) = content_box else {
             let _ = self.visual.SetClip(None::<&CompositionClip>);
+            let _ = self.visual.SetBorderMode(CompositionBorderMode::Inherit);
             return;
         };
         let rect = rect.cast::<f32>() * ScaleFactor::new(1.);
         let radius = radius.cast::<f32>() * ScaleFactor::new(1.);
+        let _ = self.visual.SetBorderMode(soft_if(!radius.is_zero()));
         let clip: windows::core::Result<CompositionClip> = if radius.is_zero() {
             // Insets are relative to the visual's size, so the clip follows a resize.
             let size = size.cast::<f32>();
@@ -233,6 +275,7 @@ impl VisualUpdate<'_> {
             ..Default::default()
         };
         let _ = self.visual.SetTransformMatrix(matrix);
+        let _ = self.visual.SetBorderMode(soft_if(m12 != 0. || m21 != 0.));
     }
 
     /// Blurs what lies beneath the node's area, of `size`, with a Gaussian blur of `sigma`
@@ -240,7 +283,7 @@ impl VisualUpdate<'_> {
     pub fn backdrop_blur(&mut self, sigma: f32, size: LogicalSize, radius: LogicalBorderRadius) {
         self.plain();
         if !(sigma > 0.) {
-            self.remove_surface_sprite();
+            self.remove_floor();
             return;
         }
         let sprite = self.surface_sprite();
@@ -290,23 +333,25 @@ impl VisualUpdate<'_> {
         if let Ok(clip) = clip {
             let _ = sprite.SetClip(&clip);
         }
+        let _ = sprite.SetBorderMode(soft_if(!radius.is_zero()));
     }
 
     /// The sprite for content drawn into a surface, below the node's children; made on first use.
     pub(crate) fn surface_sprite(&mut self) -> SpriteVisual {
-        if let Some(sprite) = &*self.surface_sprite {
-            return sprite.clone();
+        if let Some(sprite) = self.floor.as_ref().and_then(|f| f.cast::<SpriteVisual>().ok()) {
+            return sprite;
         }
+        self.remove_floor();
         let sprite = self.compositor.CreateSpriteVisual().unwrap();
         let _ = self.visual.Children().and_then(|c| c.InsertAtBottom(&sprite));
-        *self.surface_sprite = Some(sprite.clone());
+        *self.floor = Some(sprite.cast().unwrap());
         sprite
     }
 
-    /// Drops the sprite of drawn content, if there is one.
-    pub(crate) fn remove_surface_sprite(&mut self) {
-        if let Some(sprite) = self.surface_sprite.take() {
-            let _ = self.visual.Children().and_then(|c| c.Remove(&sprite));
+    /// Drops the visual of the item's own content, if there is one.
+    pub(crate) fn remove_floor(&mut self) {
+        if let Some(floor) = self.floor.take() {
+            let _ = self.visual.Children().and_then(|c| c.Remove(&floor));
         }
     }
 
@@ -330,6 +375,7 @@ impl VisualUpdate<'_> {
             let _ = new.SetClip(&clip);
         }
         let _ = new.SetTransformMatrix(old.TransformMatrix().unwrap_or(IDENTITY));
+        let _ = new.SetBorderMode(old.BorderMode().unwrap_or(CompositionBorderMode::Inherit));
         let (old_children, new_children) = (old.Children().unwrap(), new.Children().unwrap());
         // Moving the whole list keeps it in order; InsertAtBottom is O(1) (S2).
         let moved: Vec<_> = (&old_children).into_iter().collect();
@@ -407,7 +453,7 @@ impl VisualTree {
             result: RenderingResult::ContinueRenderingChildren,
             children: Vec::new(),
             next_children: Vec::new(),
-            surface_sprite: None,
+            floor: None,
             pass: 0,
             parent: None,
         });
@@ -434,7 +480,7 @@ impl VisualTree {
         for index in visited {
             let next = core::mem::take(&mut self.nodes[index].next_children);
             let visual = self.nodes[index].visual.clone();
-            let floor = self.nodes[index].surface_sprite.clone();
+            let floor = self.nodes[index].floor.clone();
             Self::patch_children(
                 &self.nodes,
                 &visual,
@@ -482,10 +528,10 @@ impl VisualTree {
                     });
                     node.geometry = Some(geometry);
                 }
-                let Node { visual, kind, content, result, surface_sprite, .. } = node;
+                let Node { visual, kind, content, result, floor, .. } = node;
                 if content.is_dirty() || resized {
                     let mut update =
-                        VisualUpdate { compositor: &self.compositor, visual, kind, surface_sprite };
+                        VisualUpdate { compositor: &self.compositor, visual, kind, floor };
                     *result = content.as_ref().evaluate(|| {
                         item.as_ref().update_visual(&item_rc, &mut update, geometry.size)
                     });
@@ -511,11 +557,11 @@ impl VisualTree {
     }
 
     /// Makes `parent`'s children match `new`, given that they currently match `old`. `floor` is
-    /// the parent's own content sprite, which stays below them.
+    /// the visual of the parent's own content, which stays below them.
     fn patch_children(
         nodes: &slab::Slab<Node>,
         parent: &ContainerVisual,
-        floor: Option<&SpriteVisual>,
+        floor: Option<&ContainerVisual>,
         old: &[usize],
         new: &[usize],
     ) {
@@ -811,7 +857,8 @@ mod tests {
         // Opaque border: the fill stops under the border, both inset by half the border width.
         assert_eq!(
             print(&visuals),
-            "Shape 0,0 100x50 [fill #ff0000ff rrect 1,1 98x48 r3] [stroke #000000ff w2 rrect 1,1 98x48 r3]
+            "Container 0,0 100x50
+  Shape -1,-1 102x52 [fill #ff0000ff rrect 1,1 98x48 r3] [stroke #000000ff w2 rrect 1,1 98x48 r3]
   Container 0,0 10x10
 "
         );
@@ -821,7 +868,8 @@ mod tests {
         sync(&mut visuals, &dyn_tree);
         assert_eq!(
             print(&visuals),
-            "Shape 0,0 100x50 [fill #ff0000ff path] [stroke #000000ff w2 path]
+            "Container 0,0 100x50
+  Shape -1,-1 102x52 [fill #ff0000ff path] [stroke #000000ff w2 path]
   Container 0,0 10x10
 "
         );
@@ -864,7 +912,8 @@ mod tests {
         sync(&mut visuals, &dyn_tree);
         assert_eq!(
             print(&visuals),
-            "Shape 0,0 100x50 [fill linear(0,25->100,25 #ff0000ff@0 #0000ffff@1) path]
+            "Container 0,0 100x50
+  Shape -1,-1 102x52 [fill linear(0,25->100,25 #ff0000ff@0 #0000ffff@1) path]
 "
         );
 
@@ -872,7 +921,8 @@ mod tests {
         sync(&mut visuals, &dyn_tree);
         assert_eq!(
             print(&visuals),
-            "Shape 0,0 200x80 [fill linear(0,40->200,40 #ff0000ff@0 #0000ffff@1) path]
+            "Container 0,0 200x80
+  Shape -1,-1 202x82 [fill linear(0,40->200,40 #ff0000ff@0 #0000ffff@1) path]
 "
         );
     }
@@ -1178,12 +1228,12 @@ mod tests {
         let c = compositor();
         let mut visual = c.CreateContainerVisual().unwrap();
         let mut kind = VisualKind::Container;
-        let mut surface_sprite = None;
+        let mut floor = None;
         let mut update = VisualUpdate {
             compositor: &c,
             visual: &mut visual,
             kind: &mut kind,
-            surface_sprite: &mut surface_sprite,
+            floor: &mut floor,
         };
         let size = LogicalSize::new(30., 20.);
         update.transform(90., 1., 1., LogicalPoint::default());

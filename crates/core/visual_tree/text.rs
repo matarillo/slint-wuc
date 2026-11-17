@@ -89,7 +89,7 @@ fn update(
 ) {
     visual.plain();
     let Some(adapter) = item_rc.window_adapter() else {
-        visual.remove_surface_sprite();
+        visual.remove_floor();
         return;
     };
     let window = WindowInner::from_pub(adapter.window());
@@ -101,7 +101,7 @@ fn update(
     let mut recorder = Recorder::new(window, ScaleFactor::new(scale));
     record(&mut recorder, adapter.renderer().text_layout_cache());
     let Some(bounds) = recorder.bounds() else {
-        visual.remove_surface_sprite();
+        visual.remove_floor();
         return;
     };
 

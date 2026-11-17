@@ -68,7 +68,7 @@ fn update(
     size: LogicalSize,
 ) -> windows::core::Result<()> {
     let Some(adapter) = item_rc.window_adapter() else {
-        visual.remove_surface_sprite();
+        visual.remove_floor();
         return Ok(());
     };
     // Read through the tracker: a new scale factor fits the image again.
@@ -91,7 +91,7 @@ fn update(
         Some(source_size)
     };
     let Some(raster) = raster.filter(|r| !r.is_empty() && !fits.is_empty()) else {
-        visual.remove_surface_sprite();
+        visual.remove_floor();
         return Ok(());
     };
     // Raster pixels per source pixel.
@@ -127,10 +127,15 @@ fn update(
             )?;
             sprite.SetClip(&clip)?;
         }
+        // Upstream draws tiles from the part's offset cut to whole pixels (`as i32`).
+        let shift = match fit.tiled {
+            Some(_) => (fit.offset.x.trunc() - origin.0, fit.offset.y.trunc() - origin.1),
+            None => inset,
+        };
         let raster_scale = Matrix3x2::scale(
             fit.source_to_target_x / (ratio.X * scale),
             fit.source_to_target_y / (ratio.Y * scale),
-        ) * Matrix3x2::translation(inset.0 / scale, inset.1 / scale);
+        ) * Matrix3x2::translation(shift.0 / scale, shift.1 / scale);
         // Raster pixels of the whole image; a tile is cut out of it into a surface of its own.
         let clip: IntRect = euclid::rect(
             (fit.clip_rect.origin.x as f32 * ratio.X) as i32,

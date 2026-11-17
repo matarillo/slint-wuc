@@ -12,11 +12,6 @@ const SHADOW: &str = "BoxShadow and drop-shadow draw nothing";
 const INNER_SHADOW: &str = "inner shadow draws nothing";
 const PATH: &str = "Path draws nothing";
 const CONIC: &str = "conic gradients draw their first color only";
-const PER_CORNER_RADIUS: &str =
-    "per-corner border radii (border-top-right-radius, ...) draw straight diagonal cuts, not arcs";
-const ROUNDED_EDGES: &str = "the edge of a rounded clip is aliased";
-const TRANSLUCENT_GRADIENT: &str =
-    "a gradient with a transparent or translucent stop interpolates color and alpha differently";
 const TEXT: &str = concat!(
     "glyph rasterization differs from the reference of the software renderer ",
     "(Skia has none for text)"
@@ -25,12 +20,10 @@ const TEXT: &str = concat!(
 /// Cases that are generated and compiled, but ignored when running: they render, and the
 /// result is known to differ from the references of upstream.
 pub const IGNORED: &[(&str, &str)] = &[
-    ("basic/backdrop-blur.slint", "the blur and the rounded corners differ at the edge of the blurred rectangle"),
-    ("basic/border-radius-overlap.slint", PER_CORNER_RADIUS),
-    ("basic/border.slint", PER_CORNER_RADIUS),
+    ("basic/backdrop-blur.slint", SHADOW),
+    ("basic/border-radius-overlap.slint", SHADOW),
     ("basic/box-shadow-sharp-spread.slint", SHADOW),
     ("basic/clip-border-radius-scaled.slint", "the edge of a rounded clip is aliased (compared with the software renderer: Skia renders the case at scale factor 1)"),
-    ("basic/clip-border-radius.slint", ROUNDED_EDGES),
     ("basic/conic-gradients.slint", CONIC),
     ("basic/drop-shadow-edge-cases.slint", SHADOW),
     ("basic/drop-shadow-painted-alpha.slint", SHADOW),
@@ -42,14 +35,9 @@ pub const IGNORED: &[(&str, &str)] = &[
     ("basic/gradient-borders.slint", CONIC),
     ("basic/inner-shadow.slint", INNER_SHADOW),
     ("basic/issue-6581-drop-shadow-transparent-fill.slint", SHADOW),
-    ("basic/linear-gradients.slint", TRANSLUCENT_GRADIENT),
     ("basic/radial-gradient-explicit-center.slint", CONIC),
-    ("basic/radial-gradients.slint", TRANSLUCENT_GRADIENT),
-    ("basic/rotated-rectangle-antialiasing.slint", "the edges of a rotated rectangle are aliased"),
     ("basic/text_features.slint", TEXT),
-    ("basic/window-linear-gradient-background.slint", TRANSLUCENT_GRADIENT),
     ("image/border-image-downscaled.slint", "a downscaled border image is filtered smoothly, the reference of the software renderer is nearest-neighbor (Skia has none)"),
-    ("image/image-repeat.slint", "one column of repeated tiles is shifted by a pixel"),
     ("image/images-scale_factor.slint", "images and text at scale factor 3.2 are filtered differently from the reference of the software renderer (Skia has none)"),
     ("image/svg-transform-scale.slint", "an SVG is magnified as a bitmap under transform-scale, not rasterized again, and comes out blurry"),
     ("layer/clip-radius-fractional-position.slint", "the edge of a rounded clip is aliased, and the glyphs differ from the reference of the software renderer (Skia has none)"),
