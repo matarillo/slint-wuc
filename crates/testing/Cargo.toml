@@ -1,0 +1,24 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[package]
+name = "i-slint-backend-testing"
+description = "Testing platform for the Slint runtime on Windows.UI.Composition"
+authors.workspace = true
+edition = "2024"
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish = false
+
+[lib]
+path = "lib.rs"
+
+[features]
+# Internal feature that is only enabled for Slint's own tests
+internal = []
+
+[dependencies]
+i-slint-core = { path = "../core" }

@@ -1,0 +1,33 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+[package]
+name = "slint-fork-test-driver"
+description = "Runs the .slint test cases of upstream Slint on this runtime"
+authors.workspace = true
+# Keep an older edition to ensure the generated code is compatible with users that don't use the latest edition
+edition = "2021"
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+publish = false
+
+[[bin]]
+path = "main.rs"
+name = "slint-fork-test-driver"
+
+# Only the generated test binaries use them.
+[dev-dependencies]
+slint ={ path = "../../crates/slint", features = ["std", "compat-1-2"] }
+i-slint-backend-testing = { path = "../../crates/testing", features = ["internal"] }
+i-slint-core = { path = "../../crates/core" }
+
+[build-dependencies]
+# The compiler is out of scope for this fork: the driver uses the published one, unmodified.
+i-slint-compiler = { version = "=1.19.0", features = ["default", "rust", "display-diagnostics"] }
+
+rayon = "1"
+spin_on = "0.1"
+test_driver_lib = { path = "../driverlib" }
