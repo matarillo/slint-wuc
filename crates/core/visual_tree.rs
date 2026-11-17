@@ -48,6 +48,8 @@ struct Node {
     geometry: Option<LogicalRect>,
     /// Tracks the properties `update_visual` read; dirty means the content needs an update.
     content: Pin<Box<PropertyTracker>>,
+    /// What `update_visual` returned last.
+    result: RenderingResult,
     /// Child nodes in back-to-front order, as last applied to the visual's children.
     children: Vec<usize>,
     /// Children collected during the current pass.
@@ -243,6 +245,7 @@ impl VisualTree {
             item: item_rc.downgrade(),
             geometry: None,
             content: Box::pin(PropertyTracker::default()),
+            result: RenderingResult::ContinueRenderingChildren,
             children: Vec::new(),
             next_children: Vec::new(),
             pass: 0,
@@ -298,6 +301,8 @@ impl VisualTree {
                 let node = &mut self.nodes[id];
                 node.pass = pass;
                 node.parent = *parent;
+                // `update_visual` gets the size as an argument, which its tracker doesn't see.
+                let resized = node.geometry.is_some_and(|g| g.size != geometry.size);
                 if node.geometry != Some(geometry) {
                     let _ = node.visual.SetOffset(Vector3 {
                         X: geometry.origin.x as f32,
@@ -310,16 +315,16 @@ impl VisualTree {
                     });
                     node.geometry = Some(geometry);
                 }
-                let mut result = RenderingResult::ContinueRenderingChildren;
-                let Node { visual, kind, content, .. } = node;
-                if content.is_dirty() {
+                let Node { visual, kind, content, result, .. } = node;
+                if content.is_dirty() || resized {
                     let mut update = VisualUpdate { compositor: &self.compositor, visual, kind };
-                    result = content.as_ref().evaluate(|| {
+                    *result = content.as_ref().evaluate(|| {
                         item.as_ref().update_visual(&item_rc, &mut update, geometry.size)
                     });
                 } else {
                     content.as_ref().register_as_dependency_to_current_binding();
                 }
+                let result = *result;
                 match parent {
                     Some(p) => self.nodes[*p].next_children.push(id),
                     None => roots.push(id),
@@ -642,6 +647,38 @@ mod tests {
             print(&visuals),
             "Sprite 0,0 100x50 #ff0000ff
   Container 0,0 10x10
+"
+        );
+    }
+
+    #[test]
+    fn a_resize_alone_updates_shapes_and_brushes() {
+        use crate::graphics::{GradientStop, LinearGradientBrush};
+        use crate::lengths::LogicalLength;
+        let tree = crate::testing::BorderTree::new((100., 50.), 0);
+        let root = tree.rect(0);
+        root.background.set(Brush::LinearGradient(LinearGradientBrush::new(
+            90.,
+            [
+                GradientStop { color: Color::from_rgb_u8(255, 0, 0), position: 0. },
+                GradientStop { color: Color::from_rgb_u8(0, 0, 255), position: 1. },
+            ],
+        )));
+        root.border_top_left_radius.set(LogicalLength::new(4.));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Shape 0,0 100x50 [fill linear(0,25->100,25 #ff0000ff@0 #0000ffff@1) path]
+"
+        );
+
+        tree.geometry(0).set(LogicalRect::new(Default::default(), LogicalSize::new(200., 80.)));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Shape 0,0 200x80 [fill linear(0,40->200,40 #ff0000ff@0 #0000ffff@1) path]
 "
         );
     }

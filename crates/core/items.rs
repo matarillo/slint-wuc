@@ -111,7 +111,7 @@ macro_rules! declare_item_vtable {
 
 /// Returned by `update_visual()` to say whether the sync pass continues into the item's children.
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RenderingResult {
     #[default]
     ContinueRenderingChildren,
