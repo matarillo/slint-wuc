@@ -446,7 +446,6 @@ const NOT_SHOWN_YET: &[(&str, u32)] = &[
     ("BoxShadow", 5),
     ("ClippedImage", 5),
     ("ComplexText", 4),
-    ("Flickable", 3),
     ("ImageItem", 5),
     ("Path", 5),
     ("SimpleText", 4),

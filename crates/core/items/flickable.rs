@@ -238,10 +238,18 @@ impl Item for Flickable {
     fn update_visual(
         self: core::pin::Pin<&Self>,
         _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 3): not shown yet.
+        // As upstream's `render`: a clip to the item. The viewport is a child item whose
+        // geometry scrolls.
+        visual.clip(
+            size,
+            Some((
+                LogicalRect::new(LogicalPoint::default(), size),
+                crate::lengths::LogicalBorderRadius::zero(),
+            )),
+        );
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 

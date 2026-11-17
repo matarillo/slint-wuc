@@ -61,9 +61,12 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 | `Opacity` | `ContainerVisual` | `Opacity`, which is group opacity on a container (S2) |
 | `Clip` | `ContainerVisual` | `InsetClip`, or `CompositionGeometricClip` with a rounded rectangle or path |
 | `Transform` | `ContainerVisual` | `TransformMatrix` |
+| `Flickable` | `ContainerVisual` | `InsetClip` to the item, as upstream's `render` clips |
 
 - `Transform` builds the matrix itself: Composition's `Scale` and `RotationAngle` apply scale before rotation, and Slint rotates first.
 - `Layer`'s `cache-rendering-hint` has no equivalent; Composition retains content anyway.
+- `Flickable` scrolls through its viewport, the `Empty` child the compiler puts between it and its content:
+  scrolling changes the viewport's `x` and `y`, so only that visual's `Offset` changes.
 - When an item needs a different visual type (a radius becomes non-zero), the node creates the new visual,
   copies offset, size, opacity, clip and transform, moves the children over, and replaces it in the parent's collection.
 
@@ -100,7 +103,6 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 
 ## Open Questions
 
-- `Flickable`'s viewport: a `TransformMatrix`, or an offset on an extra container (Phase 3).
 - Whether to share one brush per color across the window (S2 measured the memory difference).
 - How items that draw into surfaces (text, images, paths) report their content size and DPI changes; settled with S4.
 - `WindowInner::set_component` on a shown window keeps the old component alive until the window is hidden, as upstream does.
