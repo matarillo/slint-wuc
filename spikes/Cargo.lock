@@ -137,6 +137,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "s5-effects"
+version = "0.0.0"
+dependencies = [
+ "spike-common",
+ "windows",
+ "windows-collections",
+ "windows-core",
+ "windows-numerics",
+]
+
+[[package]]
 name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"

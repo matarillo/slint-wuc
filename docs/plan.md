@@ -156,11 +156,12 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - **状態**: 閉じた (2026-11-18)。text 38 件が通り、残り 2 件 (インタープリター、Phase 6 の `accessible_value`) は `tests/driver/exclusions.rs` に記載。テスト用フォントにより layout・elements の待ちケースも通った。Microsoft IME で、変換のインライン表示、候補ウィンドウの位置、文節移動、確定、取り消し、パスワード欄、フォーカス移動時の確定を `probe-text` で手動確認した。変換中の文字列がフォーカスを失うときの扱いは、将来の TSF 移行に備えて TSF に合わせた (フォーカス移動で確定、非アクティブ化で保持。IMM32 では IME 自身が非アクティブ化で確定する。`docs/design/input.md`)。持ち越し: 再変換 (`IMR_RECONVERTSTRING`、TSF 移行時の候補)、文字色の円錐グラデーション (Phase 5)、角丸クリップ (Phase 5)、16384 px を超えるテキスト (仮想サーフェス、Phase 7 の性能検証で判断)。
 
 ### Phase 5 — 画像・パス・エフェクト (Sonnet 中心、基盤は Opus)
-- [Opus] スパイク S5。
-- [Opus] `IGraphicsEffect` の Rust 実装、サーフェスキャッシュ、デバイスロスト時の再描画の基盤。
-- [Sonnet] ImageItem / ClippedImage: image-fit、alignment、source-clip、tiling、colorize、9 分割、rendering の各プロパティ。
+- [Opus] スパイク S5 (`docs/design/spike-s5-effects.md`)。エフェクトは Rust 実装の `IGraphicsEffectD2D1Interop` で成立し、D2D で焼く代替は不要。
+- [Opus] エフェクトの基盤 (`IGraphicsEffect` の Rust 実装とファクトリーのキャッシュ)、画像 1 つにサーフェス 1 つのキャッシュ、デバイス置き換え時の再転送。ImageItem を雛形として実装する (`fit()` からスプライトの矩形とブラシ変換を作る)。
+- [Sonnet] ImageItem / ClippedImage の残り: alignment、source-clip、tiling (Border エフェクト)、colorize (Composite エフェクト)、9 分割 (`CompositionNineGridBrush`)、rendering、SVG。
 - [Sonnet] Path: `PathData` → D2D ジオメトリ → `CompositionPathGeometry` (fill、stroke、cap/join、fill-rule、viewbox)。
-- [Sonnet] BoxShadow、BackdropBlur、ウィンドウ背景素材 (S5 の方式に従う)。
+- [Sonnet] BoxShadow (`BoxShadowOptions` から D2D で焼く)、BackdropBlur (背景ブラシのぼかし)、角丸クリップ、円錐グラデーション (CPU で計算したサーフェス)。
+- ウィンドウ背景素材 (Mica) は方式を確認済みだが、上流に API がないため要望があるまで実装しない。
 - [Sonnet] スクリーンショットテストと基準画像の追加。
 - **ゲート** [Opus]: スクリーンショットテストが基準画像と一致する。
 

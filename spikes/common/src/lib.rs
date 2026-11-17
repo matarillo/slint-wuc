@@ -209,6 +209,15 @@ impl Capturer {
     /// the time from starting the session to receiving the frame.
     pub fn capture(&self, visual: &impl Interface) -> Result<(Image, f64)> {
         let item = GraphicsCaptureItem::CreateFromVisual(&visual.cast::<Visual>()?)?;
+        self.capture_timed(&item)
+    }
+
+    /// Captures any capture item, such as a window's.
+    pub fn capture_item(&self, item: &GraphicsCaptureItem) -> Result<Image> {
+        Ok(self.capture_timed(item)?.0)
+    }
+
+    fn capture_timed(&self, item: &GraphicsCaptureItem) -> Result<(Image, f64)> {
         let size = item.Size()?;
         let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(
             &self.device,
@@ -216,7 +225,7 @@ impl Capturer {
             1,
             size,
         )?;
-        let session = pool.CreateCaptureSession(&item)?;
+        let session = pool.CreateCaptureSession(item)?;
         let _ = session.SetIsBorderRequired(false);
         let _ = session.SetIsCursorCaptureEnabled(false);
         let t0 = Instant::now();

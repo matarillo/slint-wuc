@@ -3,7 +3,7 @@
 # Spike binaries. Separate from the runtime workspace on purpose: they depend only on `windows`.
 [workspace]
 resolver = "3"
-members = ["common", "s1-hosting", "s2-primitives", "s3-capture", "s4-text"]
+members = ["common", "s1-hosting", "s2-primitives", "s3-capture", "s4-text", "s5-effects"]
 
 [workspace.package]
 edition = "2024"
