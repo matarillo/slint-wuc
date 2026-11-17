@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// The manual check of Phase 3. Text comes with Phase 4, so everything reports with colors:
+// - The dark bar at the top moves the window when dragged.
+// - The square on the left turns light under the mouse, orange while pressed, and shows the
+//   hand cursor. Each click adds a green square below it; a right click adds a purple one.
+// - The striped area on the right scrolls with the wheel, a touchpad, a finger or a drag.
+// - Each key press adds a blue square at the bottom; keys with Ctrl add a red one.
+export component Input inherits Window {
+    width: 320px;
+    height: 260px;
+    background: #202020;
+
+    in property <[color]> clicks;
+    in property <[color]> keys;
+    callback click(color);
+    callback key(color);
+    forward-focus: keyboard;
+
+    WindowMoveArea {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: 30px;
+
+        Rectangle {
+            background: #404040;
+        }
+    }
+
+    area := TouchArea {
+        x: 10px;
+        y: 40px;
+        width: 100px;
+        height: 100px;
+        mouse-cursor: pointer;
+        clicked => {
+            root.click(#30c030);
+        }
+        pointer-event(event) => {
+            if event.kind == PointerEventKind.up && event.button == PointerEventButton.right
+                && self.has-hover {
+                root.click(#a040c0);
+            }
+        }
+
+        Rectangle {
+            background: area.pressed ? #e08020 : area.has-hover ? #c0c0c0 : #808080;
+        }
+    }
+
+    for color[index] in root.clicks: Rectangle {
+        x: 10px + mod(index, 10) * 10px;
+        y: 150px + floor(index / 10) * 10px;
+        width: 8px;
+        height: 8px;
+        background: color;
+    }
+
+    Flickable {
+        x: 210px;
+        y: 40px;
+        width: 100px;
+        height: 150px;
+        content-height: 600px;
+
+        for i in 12: Rectangle {
+            y: i * 50px;
+            height: 50px;
+            background: mod(i, 2) == 0 ? #3060c0 : #c0c040;
+        }
+    }
+
+    for color[index] in root.keys: Rectangle {
+        x: 10px + mod(index, 30) * 10px;
+        y: 210px + floor(index / 30) * 10px;
+        width: 8px;
+        height: 8px;
+        background: color;
+    }
+
+    keyboard := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        key-pressed(event) => {
+            root.key(event.modifiers.control ? #e03030 : #3080e0);
+            accept
+        }
+    }
+}
