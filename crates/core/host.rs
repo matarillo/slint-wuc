@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 #![allow(unsafe_code)]
 
 //! The Win32 host: the event loop, top-level windows, and the services `SlintContext` asks the

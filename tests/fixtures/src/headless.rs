@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! A window without an HWND, set up through the real context and window path, for tests.
 
 use i_slint_core::SlintContext;

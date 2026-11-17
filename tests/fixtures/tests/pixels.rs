@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Pixel tests: what the compositor draws for a window's root visual.
 //!
 //! The window is detached, so nothing is shown on the desktop, but capturing needs a desktop

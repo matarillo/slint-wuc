@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Shared helpers for the spikes: thread setup, an HWND host, commit waiting,
 //! visual capture to pixels, and a text dump of a visual tree.
 

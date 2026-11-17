@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 // Cases that can't pass yet, each with the missing piece and the phase that adds it.
 // A reason that starts with `BUG:` is a failure that the missing pieces don't explain.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Snapshot tests: what the visual tree of a window looks like after each kind of change.
 //!
 //! Every test goes through the real context and window path (a headless platform, a detached

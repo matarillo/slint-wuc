@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Composition brushes and geometries for Slint brushes and rounded rectangles.
 //!
 //! Visuals use logical coordinates (the window's root visual carries the scale factor), so the

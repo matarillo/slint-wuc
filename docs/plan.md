@@ -122,6 +122,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Opus] `testing`: ツリーダンプとキャプチャの仕組み。
 - [Sonnet] `tests/fixtures`: 生成コードと同じ形の手書き `ItemTree` を複数用意し、ダンプのスナップショットテストを書く。
 - **ゲート** [Opus]: 入れ子の色付き矩形が表示され、プロパティ変更・リサイズ・DPI 変更に追従する。ダンプ/キャプチャのテストが通る。
+- **状態**: 閉じた。設定アプリでの拡大率変更には追従する (シェルによる再配置で数 px の誤差が残るが累積しない)。倍率の異なるモニター間のドラッグは、モニターがないため Phase 7 のマルチモニター検証に回す。
 
 ### Phase 2 — 構造・視覚属性・互換プローブ開始 (Opus 中心)
 - [Opus] BorderRectangle (角丸、個別角丸、枠線、グラデーション) を雛形として実装する。
@@ -133,6 +134,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Sonnet] 適合テストの実装、未実装 item 一覧の管理。以後すべてのフェーズのゲートに含める。
 - [Sonnet] 上流 `tests/cases` の properties / layout / models / conditional 系を本ランタイムで実行できるよう移植する。
 - **ゲート** [Opus]: プローブの `.slint` が動く。移植したテストが通る。同期エンジンの設計を `docs/design/visual-tree.md` に確定する。
+- **状態**: 閉じた (2026-11-17)。プローブ 3 本、上流ケース 149 件が通る。残りは `tests/driver/exclusions.rs` に理由とフェーズ付きで記載。
 
 ### Phase 3 — 入力とフォーカス (Sonnet 中心)
 - [Opus] Win32 入力の受け口 (`WM_POINTER` でマウス・タッチ・ペン、ホイール、キャプチャ、カーソル) を `WindowInner::process_mouse_input` / `process_key_input` に接続する基盤と、TouchArea を雛形として実装する。
@@ -171,6 +173,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Sonnet] `rtti` と `ffi` を全 item で有効にし、cbindgen のヘッダー生成を通す。
 - [Sonnet] 上流 `tests/cases` を Rust ドライバーで全件実行し、失敗を分類して除外リストを作る。
 - [Opus] 除外リストのうち設計起因のものの判断、性能 (Visual 数、メモリ、起動時間)・リーク・マルチモニター DPI の検証と対策。
+  マルチモニター DPI には、Phase 1 から持ち越したモニター間ドラッグの手動確認を含める (`SLINT_FORK_TRACE_DPI` でメッセージを追える)。
 - [Opus] 将来のバインディング移植 (インタープリター、Node、Python、C++) に向けたギャップ一覧を `docs/design/` に残す。
 - **ゲート** [Opus]: 適合テスト 100% (`Native*` を除く)。除外リスト付きで上流テストが通る。
 

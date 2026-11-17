@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Runs `probe-structure --check`: conditionals, z order, and repeaters over a changing model.
 
 mod common;

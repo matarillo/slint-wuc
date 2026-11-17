@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Spike S3: can tests read back what the compositor draws, with and without a window?
 
 use std::time::Instant;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Runs `probe-basics --check` and compares its visual tree dumps.
 
 mod common;

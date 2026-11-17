@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Spike S1: host a Windows.UI.Composition visual tree in a Win32 window.
 //!
 //! Usage: `s1-hosting [frames|resize|interactive] [--source clock|timer|dwmflush] [--frames N]`

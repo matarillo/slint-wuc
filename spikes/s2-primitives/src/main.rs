@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Spike S2: which composition primitives implement Slint's rectangle, border, clip, opacity,
 //! and gradients; how fractional scale factors render; and what 10k–50k visuals cost.
 //!

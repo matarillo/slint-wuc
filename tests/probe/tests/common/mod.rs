@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use std::process::Command;
 
 /// A step of `--check`: its name, the sync passes run by the end of it, and the dump.

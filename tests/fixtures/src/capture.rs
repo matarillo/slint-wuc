@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Reads back what the compositor draws for a visual, through
 //! `GraphicsCaptureItem::CreateFromVisual` (spike S3, `docs/design/spike-s3-verification.md`).
 //!

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! What every fixture shares: the geometry properties of an element, the plumbing that
 //! connects a component to its window, and the `ItemTree` methods that none of the fixtures
 //! need to implement for real (they have no repeaters, popups, or accessibility).

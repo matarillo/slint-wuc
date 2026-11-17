@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Opens a real window with `NestedRects` and changes the color of one rectangle every second.
 //!
 //! This is for the manual check of the Phase 1 gate: resize the window (the window background

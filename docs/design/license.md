@@ -18,9 +18,14 @@ Slint's runtime is available under GPL-3.0-only, the Slint Royalty-free License 
   An application that embeds the fork can still use it under the Royalty-free or commercial license, since those licenses allow modified versions.
 - Keeping the repository private until it's integrated into an application avoids the question for now.
 
-## Decision Needed
+## New Files
 
-The license of the fork's **new** files (`host/`, `composition/`, `visual_tree/`, `text/`, spikes) is the owner's choice.
-Recommendation: MIT, or MIT OR Apache-2.0.
+New files are under **MIT OR Apache-2.0**, the owner's choice of the most permissive terms.
 A permissive license combines with all three upstream licenses, so users of the fork keep the same three choices they have with upstream.
-New files are marked with their own SPDX header, for example `// SPDX-License-Identifier: MIT`.
+
+- A file written for the fork starts with `// SPDX-License-Identifier: MIT OR Apache-2.0` (`#` in TOML).
+  The license texts are in `LICENSES/MIT.txt` and `LICENSES/Apache-2.0.txt`.
+- A file copied from upstream, or adapted from upstream code, keeps upstream's header and triple license, however much it changes.
+  So do new files in a crate copied from upstream when they carry upstream's header already, such as `tests/driver`.
+- A crate's `license` field states the license of its files: `tests/probe` and the spikes are new throughout.
+  Crates that mix both, such as `crates/core` and `tests/fixtures`, keep the workspace's triple license, which covers the whole.

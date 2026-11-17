@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Shows `ui/structure.slint`; see `harness.rs` for `--check`.
 
 slint::include_modules!();

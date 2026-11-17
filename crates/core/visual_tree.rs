@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! One `Windows.UI.Composition` visual per item, kept in sync with the item tree.
 //!
 //! See `docs/design/visual-tree.md` for the design.
