@@ -15,7 +15,7 @@ use windows::Graphics::IGeometrySource2D;
 use windows::UI::Composition::{
     CompositionBrush, CompositionClip, CompositionColorGradientStopCollection,
     CompositionGeometricClip, CompositionGeometry, CompositionMappingMode, CompositionPath,
-    CompositionRoundedRectangleGeometry, Compositor, InsetClip,
+    CompositionRoundedRectangleGeometry, CompositionSpriteShape, Compositor, InsetClip,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D_SIZE_F, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
@@ -23,6 +23,7 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_SMALL, D2D1_FACTORY_TYPE_SINGLE_THREADED,
     D2D1_SWEEP_DIRECTION_CLOCKWISE, D2D1CreateFactory, ID2D1Factory, ID2D1Factory1, ID2D1Geometry,
+    ID2D1GeometrySink,
 };
 use windows::Win32::System::WinRT::Graphics::Direct2D::{
     IGeometrySource2DInterop, IGeometrySource2DInterop_Impl,
@@ -144,7 +145,14 @@ pub(super) fn rounded_rect(
         g.SetCornerRadius(Vector2 { X: r, Y: r })?;
         return g.cast();
     }
-    let geometry = rounded_rect_path(rect, radius)?;
+    path_geometry(c, rounded_rect_path(rect, radius)?)
+}
+
+/// A Direct2D geometry as a composition geometry.
+pub(super) fn path_geometry(
+    c: &Compositor,
+    geometry: ID2D1Geometry,
+) -> windows::core::Result<CompositionGeometry> {
     let source: IGeometrySource2D = D2DGeometry(geometry).into();
     c.CreatePathGeometryWithPath(&CompositionPath::Create(&source)?)?.cast()
 }
@@ -176,11 +184,10 @@ std::thread_local! {
     static D2D_FACTORY: core::cell::OnceCell<ID2D1Factory1> = const { core::cell::OnceCell::new() };
 }
 
-fn rounded_rect_path(
-    rect: euclid::Rect<f32, PhysicalPx>,
-    r: PhysicalBorderRadius,
-) -> windows::core::Result<ID2D1Geometry> {
-    let factory = D2D_FACTORY.with(|f| -> windows::core::Result<ID2D1Factory1> {
+/// The thread's Direct2D factory: the geometries composition shows and the drawing device's
+/// share it.
+pub(super) fn d2d_factory() -> windows::core::Result<ID2D1Factory1> {
+    D2D_FACTORY.with(|f| {
         if let Some(factory) = f.get() {
             return Ok(factory.clone());
         }
@@ -188,7 +195,33 @@ fn rounded_rect_path(
             unsafe { D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)? };
         let _ = f.set(factory.clone());
         Ok(factory)
-    })?;
+    })
+}
+
+/// The rounded rectangle as a Direct2D path geometry, with the radii scaled down so that
+/// adjacent corners don't overlap.
+pub(super) fn rounded_rect_path(
+    rect: euclid::Rect<f32, PhysicalPx>,
+    r: PhysicalBorderRadius,
+) -> windows::core::Result<ID2D1Geometry> {
+    let factory = d2d_factory()?;
+    unsafe {
+        let path = factory.CreatePathGeometry()?;
+        let sink = path.Open()?;
+        add_rounded_rect(&sink, rect, r);
+        sink.Close()?;
+        path.cast()
+    }
+}
+
+/// Adds the rounded rectangle to `sink` as a closed figure, with the radii scaled down so that
+/// adjacent corners don't overlap.
+pub(super) fn add_rounded_rect(
+    sink: &ID2D1GeometrySink,
+    rect: euclid::Rect<f32, PhysicalPx>,
+    r: PhysicalBorderRadius,
+) {
+    let r = clamp_radius(rect.size, r);
     let (x0, y0, x1, y1) = (rect.min_x(), rect.min_y(), rect.max_x(), rect.max_y());
     let p = |x, y| Vector2 { X: x, Y: y };
     let arc = |x, y, r: f32| D2D1_ARC_SEGMENT {
@@ -199,8 +232,6 @@ fn rounded_rect_path(
         arcSize: D2D1_ARC_SIZE_SMALL,
     };
     unsafe {
-        let path = factory.CreatePathGeometry()?;
-        let sink = path.Open()?;
         // An arc of radius 0 ends the figure where Composition reads it, so a square corner has
         // none.
         let corner = |x, y, r: f32| {
@@ -218,13 +249,26 @@ fn rounded_rect_path(
         sink.AddLine(p(x0, y0 + r.top_left));
         corner(x0 + r.top_left, y0, r.top_left);
         sink.EndFigure(D2D1_FIGURE_END_CLOSED);
-        sink.Close()?;
-        path.cast()
     }
 }
 
+/// Describes a brush transform for tree dumps: ` m=[m11 m12 m21 m22 m31 m32]`.
+fn describe_matrix(m: windows_numerics::Matrix3x2) -> alloc::string::String {
+    let round = |v: f32| (v * 1e4).round() / 1e4 + 0.;
+    alloc::format!(
+        " m=[{} {} {} {} {} {}]",
+        round(m.M11),
+        round(m.M12),
+        round(m.M21),
+        round(m.M22),
+        round(m.M31),
+        round(m.M32)
+    )
+}
+
 /// Describes a brush for tree dumps: `#rrggbbaa`, `linear(x,y->x,y #rrggbbaa@0 ...)`, or
-/// `radial(x,y rx,ry #rrggbbaa@0 ...)`.
+/// `radial(x,y rx,ry #rrggbbaa@0 ...)`, the gradients followed by their transform if they have
+/// one.
 pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String {
     use windows::UI::Composition::{
         CompositionColorBrush, CompositionGradientBrush, CompositionLinearGradientBrush,
@@ -234,7 +278,7 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
         |c: windows::UI::Color| alloc::format!("#{:02x}{:02x}{:02x}{:02x}", c.R, c.G, c.B, c.A);
     let stops = |b: &CompositionGradientBrush| -> alloc::string::String {
         let Ok(stops) = b.ColorStops() else { return Default::default() };
-        (&stops)
+        let mut out: alloc::string::String = (&stops)
             .into_iter()
             .map(|s| {
                 alloc::format!(
@@ -243,7 +287,12 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
                     s.Offset().unwrap_or(0.)
                 )
             })
-            .collect()
+            .collect();
+        let m = b.TransformMatrix().unwrap_or_default();
+        if m != windows_numerics::Matrix3x2::identity() {
+            out += &describe_matrix(m);
+        }
+        out
     };
     if let Ok(b) = brush.cast::<CompositionColorBrush>() {
         return hex(b.Color().unwrap_or_default());
@@ -257,16 +306,7 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
         let mut out = alloc::format!("surface {}x{}", size.Width, size.Height);
         let m = b.TransformMatrix().unwrap_or_default();
         if m != windows_numerics::Matrix3x2::identity() {
-            let round = |v: f32| (v * 1e4).round() / 1e4 + 0.;
-            out += &alloc::format!(
-                " m=[{} {} {} {} {} {}]",
-                round(m.M11),
-                round(m.M12),
-                round(m.M21),
-                round(m.M22),
-                round(m.M31),
-                round(m.M32)
-            );
+            out += &describe_matrix(m);
         }
         if b.BitmapInterpolationMode().ok()
             == Some(windows::UI::Composition::CompositionBitmapInterpolationMode::NearestNeighbor)
@@ -322,13 +362,12 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
 }
 
 /// Describes the shapes of a shape visual for tree dumps, each as
-/// ` [fill <brush> stroke <brush> w<thickness> <geometry>]`, the geometry being
+/// ` [fill <brush> stroke <brush> w<thickness><style> <geometry>]`, the geometry being
 /// `rrect x,y wxh r<radius>` or `path`.
 pub(super) fn describe_shapes(
     visual: &windows::UI::Composition::ShapeVisual,
 ) -> alloc::string::String {
     use core::fmt::Write;
-    use windows::UI::Composition::CompositionSpriteShape;
     let mut out = alloc::string::String::new();
     let Ok(shapes) = visual.Shapes() else { return out };
     for shape in &shapes {
@@ -340,13 +379,50 @@ pub(super) fn describe_shapes(
         }
         if let Ok(b) = shape.StrokeBrush() {
             parts.push(alloc::format!(
-                "stroke {} w{}",
+                "stroke {} w{}{}",
                 describe_brush(&b),
-                shape.StrokeThickness().unwrap_or(0.)
+                shape.StrokeThickness().unwrap_or(0.),
+                describe_stroke_style(&shape)
             ));
         }
         parts.push(shape.Geometry().map_or_else(|_| "path".into(), |g| describe_geometry(&g)));
         let _ = write!(out, "{}]", parts.join(" "));
+    }
+    out
+}
+
+/// Describes what differs from the defaults of a `Path` in a stroke: ` cap=round|square`,
+/// ` join=round|bevel`, ` miter=<limit>`, and ` dash=[<lengths>]+<offset>`.
+fn describe_stroke_style(shape: &CompositionSpriteShape) -> alloc::string::String {
+    use windows::UI::Composition::{CompositionStrokeCap, CompositionStrokeLineJoin};
+    let mut out = alloc::string::String::new();
+    match shape.StrokeStartCap() {
+        Ok(CompositionStrokeCap::Round) => out += " cap=round",
+        Ok(CompositionStrokeCap::Square) => out += " cap=square",
+        _ => {}
+    }
+    match shape.StrokeLineJoin() {
+        Ok(CompositionStrokeLineJoin::Round) => out += " join=round",
+        Ok(CompositionStrokeLineJoin::Bevel) => out += " join=bevel",
+        // A `Path`'s miter joins; its miter limit defaults to 4.
+        Ok(CompositionStrokeLineJoin::MiterOrBevel) => {
+            let limit = shape.StrokeMiterLimit().unwrap_or(4.);
+            if limit != 4. {
+                out += &alloc::format!(" miter={limit}");
+            }
+        }
+        _ => {}
+    }
+    if let Ok(dashes) = shape.StrokeDashArray()
+        && dashes.Size().unwrap_or(0) > 0
+    {
+        let lengths: alloc::vec::Vec<_> =
+            (&dashes).into_iter().map(|l| alloc::format!("{l}")).collect();
+        out += &alloc::format!(" dash=[{}]", lengths.join(","));
+        let offset = shape.StrokeDashOffset().unwrap_or(0.);
+        if offset != 0. {
+            out += &alloc::format!("+{offset}");
+        }
     }
     out
 }

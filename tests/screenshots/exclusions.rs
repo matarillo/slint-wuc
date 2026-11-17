@@ -8,9 +8,6 @@
 // difference of `color_difference` in upstream's `testing.rs`). The others are listed here, with
 // what differs.
 
-const SHADOW: &str = "BoxShadow and drop-shadow draw nothing";
-const INNER_SHADOW: &str = "inner shadow draws nothing";
-const PATH: &str = "Path draws nothing";
 const CONIC: &str = "conic gradients draw their first color only";
 const TEXT: &str = concat!(
     "glyph rasterization differs from the reference of the software renderer ",
@@ -20,35 +17,17 @@ const TEXT: &str = concat!(
 /// Cases that are generated and compiled, but ignored when running: they render, and the
 /// result is known to differ from the references of upstream.
 pub const IGNORED: &[(&str, &str)] = &[
-    ("basic/backdrop-blur.slint", SHADOW),
-    ("basic/border-radius-overlap.slint", SHADOW),
-    ("basic/box-shadow-sharp-spread.slint", SHADOW),
     ("basic/clip-border-radius-scaled.slint", "the edge of a rounded clip is aliased (compared with the software renderer: Skia renders the case at scale factor 1)"),
     ("basic/conic-gradients.slint", CONIC),
-    ("basic/drop-shadow-edge-cases.slint", SHADOW),
-    ("basic/drop-shadow-painted-alpha.slint", SHADOW),
-    ("basic/drop-shadow-per-corner-radius.slint", SHADOW),
-    ("basic/drop-shadow-rotation.slint", SHADOW),
-    ("basic/drop-shadow-spread.slint", SHADOW),
-    ("basic/drop-shadow-thick-border.slint", SHADOW),
     ("basic/gradient-border-radius.slint", CONIC),
     ("basic/gradient-borders.slint", CONIC),
-    ("basic/inner-shadow.slint", INNER_SHADOW),
-    ("basic/issue-6581-drop-shadow-transparent-fill.slint", SHADOW),
     ("basic/radial-gradient-explicit-center.slint", CONIC),
     ("basic/text_features.slint", TEXT),
     ("image/border-image-downscaled.slint", "a downscaled border image is filtered smoothly, the reference of the software renderer is nearest-neighbor (Skia has none)"),
     ("image/images-scale_factor.slint", "images and text at scale factor 3.2 are filtered differently from the reference of the software renderer (Skia has none)"),
     ("image/svg-transform-scale.slint", "an SVG is magnified as a bitmap under transform-scale, not rasterized again, and comes out blurry"),
     ("layer/clip-radius-fractional-position.slint", "the edge of a rounded clip is aliased, and the glyphs differ from the reference of the software renderer (Skia has none)"),
-    ("path/path-clip-border-radius.slint", PATH),
-    ("path/path.slint", PATH),
-    ("path/path_conic_gradient.slint", PATH),
-    ("path/path_dash_array.slint", PATH),
-    ("path/path_fill_rule.slint", PATH),
-    ("path/path_fit_preserve_stroke.slint", PATH),
-    ("path/path_gradients.slint", PATH),
-    ("path/path_nonsquare.slint", PATH),
+    ("path/path_conic_gradient.slint", CONIC),
     ("text/color-emoji.slint", "glyph rasterization differs, and the opacity of an emoji is ignored (compared with the software renderer, Skia has none)"),
     ("text/inline-code.slint", TEXT),
     ("text/line-height-factor.slint", TEXT),

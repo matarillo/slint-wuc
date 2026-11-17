@@ -123,11 +123,11 @@ impl Item for Path {
 
     fn update_visual(
         self: core::pin::Pin<&Self>,
-        _self_rc: &crate::items::ItemRc,
-        _visual: &mut crate::visual_tree::VisualUpdate<'_>,
-        _size: crate::lengths::LogicalSize,
+        self_rc: &crate::items::ItemRc,
+        visual: &mut crate::visual_tree::VisualUpdate<'_>,
+        size: crate::lengths::LogicalSize,
     ) -> crate::items::RenderingResult {
-        // TODO(phase 5): not shown yet.
+        crate::visual_tree::path::update_path(visual, self_rc, self, size);
         crate::items::RenderingResult::ContinueRenderingChildren
     }
 

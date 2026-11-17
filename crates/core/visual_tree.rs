@@ -7,13 +7,17 @@
 mod effects;
 mod graphics;
 pub mod image;
+pub mod path;
+pub mod shadow;
 mod shapes;
 pub mod text;
 
 use crate::item_rendering::{BorderRectLayout, RenderBorderRectangle};
 use crate::item_tree::{ItemTreeRc, ItemVisitorResult, ItemWeak, TraversalOrder};
 use crate::items::{ItemRc, ItemRef, RenderingResult};
-use crate::lengths::{LogicalBorderRadius, LogicalPoint, LogicalRect, LogicalSize, ScaleFactor};
+use crate::lengths::{
+    LogicalBorderRadius, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, ScaleFactor,
+};
 use crate::properties::PropertyTracker;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -111,8 +115,8 @@ impl VisualUpdate<'_> {
         self.visual.cast().unwrap()
     }
 
-    /// Makes the node a plain container with a `ShapeVisual` of `size` below its children, and
-    /// returns that and the offset of the node's origin in it.
+    /// Makes the node a plain container with a `ShapeVisual` below its children that covers the
+    /// node's area, of `size`, and returns that and the offset of the node's origin in it.
     ///
     /// The compositor antialiases shapes only in soft border mode, which also antialiases the
     /// edges of the shape visual's bounds: where a shape's edge lies on them, both apply and the
@@ -120,24 +124,28 @@ impl VisualUpdate<'_> {
     /// [`SHAPE_MARGIN`] so that its bounds lie where nothing is drawn. Being below the children,
     /// its border mode doesn't pass on to them.
     pub fn shape(&mut self, size: LogicalSize) -> (ShapeVisual, Vector2) {
+        self.shape_covering(euclid::Rect::from_size(size.cast::<f32>()))
+    }
+
+    /// Like [`Self::shape`], for shapes that reach outside the node's area: the shape visual
+    /// covers `area`, a rectangle in the node's coordinates, which contains the node's area.
+    /// Composition cuts shapes off at the bounds of their visual.
+    pub fn shape_covering(&mut self, area: euclid::Rect<f32, LogicalPx>) -> (ShapeVisual, Vector2) {
         self.plain();
         let shape = match self.floor.as_ref().and_then(|f| f.cast::<ShapeVisual>().ok()) {
             Some(shape) => shape,
             None => {
                 self.remove_floor();
                 let shape = self.compositor.CreateShapeVisual().unwrap();
-                let _ = shape.SetOffset(Vector3 { X: -SHAPE_MARGIN, Y: -SHAPE_MARGIN, Z: 0. });
                 let _ = self.visual.Children().and_then(|c| c.InsertAtBottom(&shape));
                 *self.floor = Some(shape.cast().unwrap());
                 shape
             }
         };
-        let size = size.cast::<f32>();
-        let _ = shape.SetSize(Vector2 {
-            X: size.width + 2. * SHAPE_MARGIN,
-            Y: size.height + 2. * SHAPE_MARGIN,
-        });
-        (shape, Vector2 { X: SHAPE_MARGIN, Y: SHAPE_MARGIN })
+        let area = area.inflate(SHAPE_MARGIN, SHAPE_MARGIN);
+        let _ = shape.SetOffset(Vector3 { X: area.min_x(), Y: area.min_y(), Z: 0. });
+        let _ = shape.SetSize(Vector2 { X: area.width(), Y: area.height() });
+        (shape, Vector2 { X: -area.min_x(), Y: -area.min_y() })
     }
 
     /// Makes the node a plain `ContainerVisual`, dropping any brush or shapes.
@@ -890,6 +898,167 @@ mod tests {
             "Sprite 0,0 100x50 #ff0000ff
   Container 0,0 10x10
 "
+        );
+    }
+
+    #[test]
+    fn a_path_is_one_shape_that_covers_what_it_draws() {
+        use crate::lengths::LogicalLength;
+        let tree = crate::testing::PathTree::new((100., 50.), 0);
+        let path = tree.rect(0);
+        path.elements.set(crate::graphics::PathData::Commands("M 10 5 L 40 5 L 40 30".into()));
+        path.fit.set(crate::items::ImageFit::Preserve);
+        path.stroke_miter_limit.set(4.);
+        path.fill.set(red());
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -1,-1 102x52 [fill #ff0000ff path]\n"
+        );
+
+        path.stroke.set(Brush::SolidColor(Color::from_rgb_u8(0, 0, 0)));
+        path.stroke_width.set(LogicalLength::new(2.));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -1,-1 102x52 [fill #ff0000ff stroke #000000ff w2 path]\n"
+        );
+
+        // The shape visual cuts off what lies outside it: it grows to the path and its stroke,
+        // which reaches four half widths past a vertex, the miter limit.
+        path.elements.set(crate::graphics::PathData::Commands("M -10 5 L 40 5".into()));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -15,-1 116x52 [fill #ff0000ff stroke #000000ff w2 path]\n"
+        );
+
+        // Not so when the path clips at the item.
+        path.clip.set(true);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -1,-1 102x52 [fill #ff0000ff stroke #000000ff w2 path] clip=inset(1,1,1,1)\n"
+        );
+        path.clip.set(false);
+
+        // Nothing to draw: no brush, or no elements.
+        path.stroke.set(Brush::default());
+        path.fill.set(Brush::default());
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n");
+        path.fill.set(red());
+        path.elements.set(crate::graphics::PathData::None);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x50\n");
+    }
+
+    #[test]
+    fn a_path_stroke_has_the_caps_joins_and_dashes_of_the_item() {
+        use crate::items::{LineCap, LineJoin};
+        use crate::lengths::LogicalLength;
+        let tree = crate::testing::PathTree::new((100., 50.), 0);
+        let path = tree.rect(0);
+        path.elements.set(crate::graphics::PathData::Commands("M 10 5 L 40 5 L 40 30".into()));
+        path.fit.set(crate::items::ImageFit::Preserve);
+        path.stroke.set(red());
+        path.stroke_width.set(LogicalLength::new(3.));
+        path.stroke_miter_limit.set(4.);
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        // What the dump says about the stroke after its width.
+        let stroke = |visuals: &mut VisualTree| -> alloc::string::String {
+            sync(visuals, &dyn_tree);
+            let dump = visuals.dump();
+            let style = dump.split_once("stroke #ff0000ff w3").unwrap().1;
+            style.split_once(" path").unwrap().0.into()
+        };
+        assert_eq!(stroke(&mut visuals), "");
+
+        path.stroke_line_cap.set(LineCap::Round);
+        path.stroke_line_join.set(LineJoin::Bevel);
+        assert_eq!(stroke(&mut visuals), " cap=round join=bevel");
+        path.stroke_line_cap.set(LineCap::Square);
+        path.stroke_line_join.set(LineJoin::Round);
+        assert_eq!(stroke(&mut visuals), " cap=square join=round");
+        path.stroke_line_cap.set(LineCap::Butt);
+        path.stroke_line_join.set(LineJoin::Miter);
+        path.stroke_miter_limit.set(1.5);
+        assert_eq!(stroke(&mut visuals), " miter=1.5");
+
+        // Dashes are in logical pixels, and the offset wraps around the pattern, as in Skia.
+        path.stroke_miter_limit.set(4.);
+        path.stroke_dash_array.set(crate::SharedVector::from_slice(&[8., 5.]));
+        path.stroke_dash_offset.set(LogicalLength::new(4.));
+        assert_eq!(stroke(&mut visuals), " dash=[8,5]+4");
+        path.stroke_dash_offset.set(LogicalLength::new(-6.));
+        assert_eq!(stroke(&mut visuals), " dash=[8,5]+7");
+
+        // Skia ignores a pattern it can't use.
+        path.stroke_dash_array.set(crate::SharedVector::from_slice(&[8., 5., 2.]));
+        assert_eq!(stroke(&mut visuals), "");
+        path.stroke_dash_array.set(crate::SharedVector::from_slice(&[0., 0.]));
+        assert_eq!(stroke(&mut visuals), "");
+
+        // A stroke of width 0 is a hairline in Skia: one pixel wide.
+        path.stroke_width.set(LogicalLength::new(0.));
+        sync(&mut visuals, &dyn_tree);
+        assert!(visuals.dump().contains("stroke #ff0000ff w1 path"));
+    }
+
+    #[test]
+    fn a_path_antialiases_as_its_property_says() {
+        let tree = crate::testing::PathTree::new((100., 50.), 0);
+        let path = tree.rect(0);
+        path.elements.set(crate::graphics::PathData::Commands("M 10 5 L 40 5 L 40 30".into()));
+        path.fill.set(red());
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        // The border mode of the shape visual.
+        let border_mode = |visuals: &VisualTree| {
+            let node = (&visuals.root.Children().unwrap()).into_iter().next().unwrap();
+            let floor = node.cast::<ContainerVisual>().unwrap().Children().unwrap();
+            (&floor).into_iter().next().unwrap().BorderMode().unwrap()
+        };
+        path.anti_alias.set(true);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(border_mode(&visuals), CompositionBorderMode::Soft);
+        path.anti_alias.set(false);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(border_mode(&visuals), CompositionBorderMode::Hard);
+    }
+
+    #[test]
+    fn a_path_gradient_spans_the_viewbox_scaled_to_the_item() {
+        use crate::graphics::{GradientStop, LinearGradientBrush};
+        let tree = crate::testing::PathTree::new((100., 50.), 0);
+        let path = tree.rect(0);
+        path.elements.set(crate::graphics::PathData::Commands("M 10 5 L 40 5 L 40 30".into()));
+        path.fit.set(crate::items::ImageFit::Preserve);
+        path.fill.set(Brush::LinearGradient(LinearGradientBrush::new(
+            90.,
+            [
+                GradientStop { color: Color::from_rgb_u8(255, 0, 0), position: 0. },
+                GradientStop { color: Color::from_rgb_u8(0, 0, 255), position: 1. },
+            ],
+        )));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -1,-1 102x52 [fill linear(0,25->100,25 #ff0000ff@0 #0000ffff@1) path]\n"
+        );
+
+        // With a viewbox of 20 by 10, the gradient is made for that and scaled by 5.
+        path.viewbox_width.set(20.);
+        path.viewbox_height.set(10.);
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -1,-1 102x52 [fill linear(0,5->20,5 #ff0000ff@0 #0000ffff@1 m=[5 0 0 5 0 0]) path]\n"
         );
     }
 

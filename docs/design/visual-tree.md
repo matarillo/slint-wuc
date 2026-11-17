@@ -65,6 +65,8 @@ If profiling shows the walk above about 1 ms for realistic trees, switch to per-
 | Text items | `ContainerVisual` with a content sprite and a surface brush | the text drawn into a drawing surface; see [Text](#text) |
 | `ImageItem`, `ClippedImage` | `ContainerVisual` with a floor sprite, and a child sprite per part of a nine-slice image | surface brushes, through effects for tiling and colorize; see [Images](#images) |
 | `BackdropBlur` | `ContainerVisual` with a floor sprite | a blur effect over a backdrop brush; see [Images](#images) |
+| `Path` | `ContainerVisual` with a floor `ShapeVisual` | one sprite shape on a geometry made from the fitted path; see [Paths](#paths) |
+| `BoxShadow` | `ContainerVisual` with a floor sprite | the shadow texture drawn into a drawing surface; see [Shadows](#shadows) |
 
 - `Transform` builds the matrix itself: Composition's `Scale` and `RotationAngle` apply scale before rotation, and Slint rotates first.
 - `Layer`'s `cache-rendering-hint` has no equivalent; Composition retains content anyway.
@@ -94,7 +96,7 @@ Only the drawing is new.
 - **Changes.** The node's content tracker sees what parley reads, including the window's scale factor, so a change of text, style, size or scale factor redraws the surface.
   The cursor's blinking is a property too: it redraws the text input, which costs about 25 µs (S4).
 - **Device.** One D3D11 device, its D2D device, and one `CompositionGraphicsDevice` per UI thread, shared by its windows.
-  When the device is lost or replaced, every text node is marked dirty and redraws.
+  When the device is lost or replaced, every text and shadow node is marked dirty and redraws.
   The devices are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
 - **Cache.** The window's renderer keeps upstream's `TextLayoutCache`, which measurement and drawing share; destroyed components leave it as in upstream's renderers.
 - **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
@@ -105,7 +107,7 @@ Only the drawing is new.
 Upstream's Skia renderer antialiases rounded rectangles, clips with a radius, and everything under a rotation, and draws axis-aligned rectangles without.
 The compositor antialiases edges, clips and shapes only in `CompositionBorderMode::Soft`; the default `Hard` snaps them to pixels.
 
-- A `Transform` that rotates, a clip with a radius, and a rounded rectangle's shapes get `Soft`.
+- A `Transform` that rotates, a clip with a radius, a rounded rectangle's shapes, and a `Path` with `anti-alias` get `Soft`.
   Everything else inherits, so it's `Hard` unless a rotation is above it.
 - Soft mode also antialiases the edges of the visual's own bounds.
   Where a shape's edge lies on them, both apply and the edge comes out lighter than upstream's.
@@ -145,6 +147,49 @@ The code is in `visual_tree/image.rs`.
 `BackdropBlur` shows a `GaussianBlur` effect over a `CompositionBackdropBrush` in its floor sprite.
 The blur amount is in logical pixels, since the root visual carries the scale factor.
 A backdrop brush sees only what's behind its sprite, so the sprite reaches 3σ beyond the item and an inset or rounded clip cuts it back to the item, as upstream's blur picks up content that far.
+
+### Paths
+
+`Path` shows what upstream's Skia renderer draws in `draw_path`.
+The code is in `visual_tree/path.rs`.
+
+- **Geometry.** `fitted_path_events` gives the lyon events, which become a Direct2D path geometry in logical pixels, with `fill-rule` as the fill mode.
+  `CompositionPath` wraps it as it does for a rounded rectangle with different radii.
+  The shape is offset by the logical offset of the fit.
+- **Shape.** One `CompositionSpriteShape` in the node's floor `ShapeVisual`.
+  The fill brush is made for the item, or for the viewbox when there is one and scaled to the item, as upstream's.
+  The stroke brush is made for the item.
+- **Stroke.** `stroke-width` is the thickness; a width of 0 is a hairline of one physical pixel, as in Skia.
+  `stroke-line-cap` sets the start, end and dash caps; `stroke-line-join` maps `miter` to `MiterOrBevel`, which bevels beyond the miter limit as Skia does.
+  The dash array and offset are in logical pixels, which Composition takes as they are.
+  The offset wraps around the pattern.
+  A pattern that Skia ignores (an odd count, a negative length, a sum of 0) is solid here too.
+- **Antialiasing.** The floor's border mode is `Soft` for `anti-alias: true` and `Hard` for `false`; see [Antialiasing](#antialiasing).
+- **Bounds.** Composition cuts a shape off at the bounds of its visual.
+  The floor covers the item and what the path draws outside it: the geometry's bounds grown by the reach of the stroke, which is the miter limit in half widths, or the corner of a square cap.
+  With `clip: true` it covers the item only, with an `InsetClip` at the item's edges.
+  The compiler lowers `clip` on a `Rectangle` to a `Clip` element, but keeps it as a property of `Path`, whose `render` clips to the item's rectangle.
+- **Known differences.** A conic gradient fill draws its first color, as elsewhere.
+  Edge coverage differs from Skia's by a few levels, and rounded joins and caps by a pixel at their curves.
+
+### Shadows
+
+`BoxShadow` shows the texture that upstream's Skia renderer makes in `render_drop_shadow_image` and `render_inset_shadow_image`, drawn with Direct2D instead ([S5](spike-s5-effects.md)).
+The code is in `visual_tree/shadow.rs`.
+
+- **Geometry.** `BoxShadowOptions` gives the shape, the sizes and the radii, as it does upstream.
+  A drop shadow's texture is `drop_texture_size()`, with the shape at the blur's padding; its sprite is at the item's offset minus blur and spread.
+  An inset shadow's texture is the item's size, at the item's origin.
+  Both are in physical pixels divided by the scale factor, and the sprite snaps to whole pixels as the images' do.
+- **Drawing.** The silhouette goes into a Direct2D command list: the rounded rectangle grown by the spread if the background is opaque, else what the background and the border paint, with their brushes; for an inset shadow, the item's rectangle with the hole cut out by the even-odd rule.
+  The `Shadow` effect blurs it with σ = `blur_sigma()` and colors it.
+  An inset shadow is then cut to the item's rounded rectangle with a `Composite` effect in `SOURCE_IN` mode.
+- **Surface.** The node's own surface sprite keeps its surface, which is resized when the texture's size changes and drawn again when the content tracker reruns.
+  The tracker sees the item's properties, the scale factor and the device generation.
+  There is no cache across nodes, as there is upstream: each node holds one texture.
+- **Shared code.** `visual_tree/graphics.rs` has what text and shadows both use: the surface of a sprite, Direct2D brushes for Slint's, and the recovery from a lost device.
+- **Known differences.** The `Shadow` effect's Gaussian differs from Skia's blur mask by a few levels near the shape's edge.
+  A shadow wider or higher than 16384 pixels isn't drawn.
 
 ### Snapshots
 

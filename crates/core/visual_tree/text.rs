@@ -6,8 +6,8 @@
 #![allow(unsafe_code)]
 
 use super::VisualUpdate;
-use super::graphics::{Graphics, graphics};
-use crate::graphics::{Brush, Color, GradientStop, ResolvedBrush, resolve_brush};
+use super::graphics::{Graphics, MAX_SURFACE_SIDE, graphics, sprite_surface};
+use crate::graphics::{Brush, Color};
 use crate::item_rendering::{
     CachedRenderingData, ItemRenderer, RenderBorderRectangle, RenderImage, RenderRectangle,
     RenderText,
@@ -24,18 +24,13 @@ use crate::textlayout::sharedparley::{
 use crate::window::WindowInner;
 use alloc::vec::Vec;
 use core::pin::Pin;
-use windows::Foundation::Size;
-use windows::Graphics::DirectX::{DirectXAlphaMode, DirectXPixelFormat};
-use windows::UI::Composition::{
-    CompositionDrawingSurface, CompositionStretch, CompositionSurfaceBrush, SpriteVisual,
-};
-use windows::Win32::Foundation::{D2DERR_RECREATE_TARGET, DWRITE_E_NOCOLOR, POINT, SIZE};
-use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F, D2D1_GRADIENT_STOP};
+use windows::UI::Composition::SpriteVisual;
+use windows::Win32::Foundation::{DWRITE_E_NOCOLOR, POINT, SIZE};
+use windows::Win32::Graphics::Direct2D::Common::{D2D_RECT_F, D2D1_COLOR_F};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT,
-    D2D1_EXTEND_MODE_CLAMP, D2D1_GAMMA_2_2, D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES,
-    D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES, D2D1_ROUNDED_RECT, D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE,
-    ID2D1Brush, ID2D1DeviceContext, ID2D1DeviceContext4, ID2D1DeviceContext7, ID2D1RenderTarget,
+    D2D1_ANTIALIAS_MODE_ALIASED, D2D1_COLOR_BITMAP_GLYPH_SNAP_OPTION_DEFAULT, D2D1_ROUNDED_RECT,
+    D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE, ID2D1Brush, ID2D1DeviceContext, ID2D1DeviceContext4,
+    ID2D1DeviceContext7,
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_GLYPH_IMAGE_FORMATS_CFF, DWRITE_GLYPH_IMAGE_FORMATS_COLR,
@@ -45,16 +40,12 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_GLYPH_IMAGE_FORMATS_TRUETYPE, DWRITE_GLYPH_OFFSET, DWRITE_GLYPH_RUN,
     DWRITE_MEASURING_MODE_NATURAL, IDWriteFactory8, IDWriteFontFace,
 };
-use windows::Win32::Graphics::Dxgi::{DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET};
 use windows::Win32::System::WinRT::Composition::ICompositionDrawingSurfaceInterop;
 use windows::core::{BOOL, Interface};
 use windows_numerics::{Matrix3x2, Vector2, Vector3};
 
 type PhysicalSize = euclid::Size2D<f32, PhysicalPx>;
 type PhysicalPoint = euclid::Point2D<f32, PhysicalPx>;
-
-/// The largest surface side Direct3D 11 hardware supports.
-const MAX_SURFACE_SIDE: f32 = 16384.;
 
 /// Shows a `Text`, `SimpleText`, `ComplexText` or `StyledTextItem`.
 pub fn update_text(
@@ -107,15 +98,7 @@ fn update(
 
     let sprite = visual.surface_sprite();
     if let Err(e) = draw(&graphics, &sprite, &recorder.commands, bounds, scale) {
-        let code = e.code();
-        if code == DXGI_ERROR_DEVICE_REMOVED
-            || code == DXGI_ERROR_DEVICE_RESET
-            || code == D2DERR_RECREATE_TARGET
-        {
-            graphics.device_lost();
-        } else {
-            crate::debug_log!("cannot draw text: {}", e.message());
-        }
+        graphics.drawing_failed(&e, "text");
     }
     let _ =
         sprite.SetOffset(Vector3 { X: bounds.origin.x / scale, Y: bounds.origin.y / scale, Z: 0. });
@@ -412,32 +395,7 @@ fn draw(
     scale: f32,
 ) -> windows::core::Result<()> {
     let size = SIZE { cx: bounds.width() as i32, cy: bounds.height() as i32 };
-    let surface = match sprite.Brush().and_then(|b| b.cast::<CompositionSurfaceBrush>()) {
-        Ok(brush) => {
-            let surface: CompositionDrawingSurface = brush.Surface()?.cast()?;
-            let current = surface.SizeInt32()?;
-            if (current.Width, current.Height) != (size.cx, size.cy) {
-                let interop: ICompositionDrawingSurfaceInterop = surface.cast()?;
-                unsafe { interop.Resize(size)? };
-            }
-            surface
-        }
-        Err(_) => {
-            let surface = graphics.composition.CreateDrawingSurface(
-                Size { Width: size.cx as f32, Height: size.cy as f32 },
-                DirectXPixelFormat::B8G8R8A8UIntNormalized,
-                DirectXAlphaMode::Premultiplied,
-            )?;
-            let compositor = sprite.Compositor()?;
-            let brush = compositor.CreateSurfaceBrushWithSurface(&surface)?;
-            brush.SetStretch(CompositionStretch::Fill)?;
-            // Whole pixels keep the text as sharp as it was drawn (S4).
-            brush.SetSnapToPixels(true)?;
-            sprite.SetBrush(&brush)?;
-            surface
-        }
-    };
-
+    let surface = sprite_surface(graphics, sprite, size)?;
     let interop: ICompositionDrawingSurfaceInterop = surface.cast()?;
     let mut offset = POINT::default();
     let dc: ID2D1DeviceContext = unsafe { interop.BeginDraw(None, &mut offset)? };
@@ -704,69 +662,7 @@ fn rounded(r: PhysicalRect, radius: f32) -> D2D1_ROUNDED_RECT {
     D2D1_ROUNDED_RECT { rect: d2d_rect(r), radiusX: radius, radiusY: radius }
 }
 
-fn d2d_color(c: Color) -> D2D1_COLOR_F {
-    D2D1_COLOR_F {
-        r: c.red() as f32 / 255.,
-        g: c.green() as f32 / 255.,
-        b: c.blue() as f32 / 255.,
-        a: c.alpha() as f32 / 255.,
-    }
-}
-
 /// A Direct2D brush for a text brush; gradients span the item, as in upstream's renderers.
 fn d2d_brush(dc: &ID2D1DeviceContext, brush: &TextBrush, scale: f32) -> Option<ID2D1Brush> {
-    let resolved = resolve_brush(&brush.brush, brush.size, ScaleFactor::new(scale))?;
-    let stops = |stops: &[GradientStop]| -> windows::core::Result<_> {
-        let stops: Vec<D2D1_GRADIENT_STOP> = stops
-            .iter()
-            .map(|s| D2D1_GRADIENT_STOP { position: s.position, color: d2d_color(s.color) })
-            .collect();
-        // Interpolated in sRGB, as upstream's renderers do.
-        unsafe {
-            ID2D1RenderTarget::CreateGradientStopCollection(
-                dc,
-                &stops,
-                D2D1_GAMMA_2_2,
-                D2D1_EXTEND_MODE_CLAMP,
-            )
-        }
-    };
-    let point = |p: PhysicalPoint| Vector2 { X: p.x, Y: p.y };
-    let result: windows::core::Result<ID2D1Brush> = (|| unsafe {
-        match resolved {
-            ResolvedBrush::SolidColor(color) => {
-                dc.CreateSolidColorBrush(&d2d_color(color), None)?.cast()
-            }
-            ResolvedBrush::LinearGradient(g) => dc
-                .CreateLinearGradientBrush(
-                    &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
-                        startPoint: point(g.start),
-                        endPoint: point(g.end),
-                    },
-                    None,
-                    &stops(&g.stops)?,
-                )?
-                .cast(),
-            ResolvedBrush::RadialGradient(g) => dc
-                .CreateRadialGradientBrush(
-                    &D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
-                        center: point(g.center),
-                        gradientOriginOffset: Vector2::default(),
-                        radiusX: g.radius_x.get(),
-                        radiusY: g.radius_y.get(),
-                    },
-                    None,
-                    &stops(&g.stops)?,
-                )?
-                .cast(),
-            // TODO(phase 5): conic gradients, with the other surface drawing.
-            ResolvedBrush::ConicGradient(g) => dc
-                .CreateSolidColorBrush(
-                    &d2d_color(g.stops.first().map(|s| s.color).unwrap_or_default()),
-                    None,
-                )?
-                .cast(),
-        }
-    })();
-    result.ok()
+    super::graphics::d2d_brush(dc, &brush.brush, brush.size, scale)
 }

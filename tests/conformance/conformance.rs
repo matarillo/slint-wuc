@@ -441,8 +441,7 @@ fn globals_match_the_compiler() {
 
 /// The items whose `update_visual` doesn't show them yet, with the phase that adds them.
 /// The `TODO(phase N)` comments in the bodies of `update_visual` are the source of truth.
-const NOT_SHOWN_YET: &[(&str, u32)] =
-    &[("BoxShadow", 5), ("Path", 5)];
+const NOT_SHOWN_YET: &[(&str, u32)] = &[];
 
 /// The `(item struct, phase)` of each `update_visual` in `source` that has a `TODO(phase N)` comment.
 ///
