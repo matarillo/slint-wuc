@@ -48,6 +48,65 @@ pub fn mock_elapsed_time(time_in_ms: u64) {
     }
 }
 
+/// Simulate a click at (`x`, `y`) and release after 50 ms of mock time.
+#[cfg(feature = "internal")]
+pub fn send_mouse_click(x: f32, y: f32, window_adapter: &i_slint_core::window::WindowAdapterRc) {
+    use i_slint_core::api::LogicalPosition;
+    use i_slint_core::items::PointerEventButton;
+    use i_slint_core::platform::WindowEvent;
+
+    let position = LogicalPosition::new(x, y);
+    let button = PointerEventButton::Left;
+
+    window_adapter.window().dispatch_event(WindowEvent::PointerMoved { position });
+    window_adapter.window().dispatch_event(WindowEvent::PointerPressed { position, button });
+    mock_elapsed_time(50);
+    window_adapter.window().dispatch_event(WindowEvent::PointerReleased { position, button });
+}
+
+/// Dispatch a single key press or release event.
+#[cfg(feature = "internal")]
+pub fn send_keyboard_key_text(
+    text: &i_slint_core::SharedString,
+    pressed: bool,
+    window_adapter: &i_slint_core::window::WindowAdapterRc,
+) {
+    use i_slint_core::platform::WindowEvent;
+    window_adapter.window().dispatch_event(if pressed {
+        WindowEvent::KeyPressed { text: text.clone() }
+    } else {
+        WindowEvent::KeyReleased { text: text.clone() }
+    })
+}
+
+/// Simulate typing a string, with automatic Shift handling for uppercase letters.
+#[cfg(feature = "internal")]
+pub fn send_keyboard_string_sequence(
+    sequence: &i_slint_core::SharedString,
+    window_adapter: &i_slint_core::window::WindowAdapterRc,
+) {
+    use i_slint_core::input::key_codes::Key;
+    use i_slint_core::platform::WindowEvent;
+
+    for ch in sequence.chars() {
+        if ch.is_ascii_uppercase() {
+            window_adapter
+                .window()
+                .dispatch_event(WindowEvent::KeyPressed { text: Key::Shift.into() });
+        }
+
+        let text: i_slint_core::SharedString = ch.into();
+        window_adapter.window().dispatch_event(WindowEvent::KeyPressed { text: text.clone() });
+        window_adapter.window().dispatch_event(WindowEvent::KeyReleased { text });
+
+        if ch.is_ascii_uppercase() {
+            window_adapter
+                .window()
+                .dispatch_event(WindowEvent::KeyReleased { text: Key::Shift.into() });
+        }
+    }
+}
+
 /// Return the current mocked time in milliseconds.
 pub fn get_mocked_time() -> u64 {
     i_slint_core::animations::CURRENT_ANIMATION_DRIVER
@@ -113,17 +172,38 @@ impl Platform for TestingPlatform {
 }
 
 /// What tests can reach of a window created by the [`TestingPlatform`], through
-/// [`access_testing_window`].
-///
-/// The window itself belongs to the host, so this only exposes what the platform records.
+/// [`access_testing_window`]: what upstream's testing window records, which the host records
+/// for its windows.
 #[cfg(feature = "internal")]
-pub struct TestingWindow(());
+pub struct TestingWindow<'a> {
+    host: &'a host::Win32WindowAdapter,
+    /// The input method requests since a test last took them.
+    pub ime_requests: &'a RefCell<Vec<i_slint_core::window::InputMethodRequest>>,
+}
 
 #[cfg(feature = "internal")]
-impl TestingWindow {
+impl TestingWindow<'_> {
     /// Drain and return all debug_log messages captured since the last call.
     pub fn take_debug_log(&self) -> Vec<String> {
         DEBUG_LOGS.with(|logs| logs.borrow_mut().drain(..).collect())
+    }
+
+    pub fn ime_requests(&self) -> Vec<i_slint_core::window::InputMethodRequest> {
+        self.ime_requests.borrow().clone()
+    }
+
+    pub fn clear_ime_requests(&self) {
+        self.ime_requests.borrow_mut().clear();
+    }
+
+    /// The cursor the window last asked for.
+    pub fn mouse_cursor(&self) -> i_slint_core::cursor::MouseCursorInner {
+        self.host.mouse_cursor_for_testing()
+    }
+
+    /// Number of interactive window moves requested via `WindowMoveArea`.
+    pub fn window_move_request_count(&self) -> usize {
+        self.host.window_move_requests_for_testing()
     }
 }
 
@@ -139,5 +219,6 @@ pub fn access_testing_window<R>(
         live_windows().iter().any(|adapter| core::ptr::eq(adapter.window(), window)),
         "access_testing_window called without testing platform/adapter"
     );
-    callback(&TestingWindow(()))
+    let host = host::Win32WindowAdapter::from_window(window).expect("the host created the window");
+    callback(&TestingWindow { host: &host, ime_requests: host.ime_requests_for_testing() })
 }

@@ -22,3 +22,4 @@ internal = []
 
 [dependencies]
 i-slint-core = { path = "../core" }
+vtable = { workspace = true }

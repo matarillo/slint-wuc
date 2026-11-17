@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 mod exclusions;
 
 /// The folders of the upstream cases that this driver runs, one test binary each.
-const CASE_FOLDERS: &[&str] = &["properties", "layout", "models", "conditional"];
+const CASE_FOLDERS: &[&str] = &["properties", "layout", "models", "conditional", "input", "focus"];
 
 /// The upstream cases are read in place, not copied.
 fn case_root() -> PathBuf {
@@ -192,13 +192,18 @@ fn process_case(testcase: &test_driver_lib::TestCase) -> std::io::Result<String>
     {
         // The closure's `Ok(())` keeps the snippet's last line a statement: a trailing
         // `if let` would otherwise trip the edition 2024 tail-expression drop-order lint.
-        // The clippy allows are for the closure and for snippets that compare with `true`;
-        // the generated modules deny warnings, which includes clippy's.
+        // The clippy allows are for the closure, for snippets that compare with `true`, and
+        // for snippets that fail with `assert!(false, ..)`; the generated modules deny
+        // warnings, which includes clippy's.
         write!(
             output,
             r"
 #[rust_analyzer::skip]
-#[allow(clippy::redundant_closure_call, clippy::bool_assert_comparison)]
+#[allow(
+    clippy::redundant_closure_call,
+    clippy::bool_assert_comparison,
+    clippy::assertions_on_constants
+)]
 #[test] {} fn t_{}() {{
     (|| -> ::std::result::Result<(), ::std::boxed::Box<dyn ::std::error::Error>> {{
         use i_slint_backend_testing as slint_testing;

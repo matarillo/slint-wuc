@@ -9,6 +9,10 @@
 
 mod search_api;
 pub use search_api::*;
+#[cfg(feature = "internal")]
+mod internal_tests;
+#[cfg(feature = "internal")]
+pub use internal_tests::*;
 pub mod testing_platform;
 pub use testing_platform::{TestingPlatform, get_mocked_time};
 #[cfg(feature = "internal")]

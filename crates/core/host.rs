@@ -398,6 +398,11 @@ pub struct Win32WindowAdapter {
     visible: Cell<bool>,
     mouse: input::Mouse,
     pointers: pointer::Pointers,
+    /// What the window was asked for, for tests, as upstream's testing window records it.
+    cursor_request: RefCell<crate::cursor::MouseCursorInner>,
+    window_move_requests: Cell<usize>,
+    /// Only kept for detached windows: real ones hand the requests to the input method.
+    ime_requests: RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>>,
 }
 
 impl Win32WindowAdapter {
@@ -432,6 +437,9 @@ impl Win32WindowAdapter {
             visible: Cell::new(false),
             mouse: input::Mouse::new(),
             pointers: Default::default(),
+            cursor_request: Default::default(),
+            window_move_requests: Cell::new(0),
+            ime_requests: Default::default(),
         }))
     }
 
@@ -551,6 +559,26 @@ impl Win32WindowAdapter {
         if let Some(hwnd) = self.hwnd.get() {
             pointer::dispatch(self, hwnd, message);
         }
+    }
+
+    /// The cursor that the window last asked for.
+    #[doc(hidden)]
+    pub fn mouse_cursor_for_testing(&self) -> crate::cursor::MouseCursorInner {
+        self.cursor_request.borrow().clone()
+    }
+
+    /// How many times a `WindowMoveArea` asked to move the window.
+    #[doc(hidden)]
+    pub fn window_move_requests_for_testing(&self) -> usize {
+        self.window_move_requests.get()
+    }
+
+    /// The input method requests of a detached window, since the last time a test took them.
+    #[doc(hidden)]
+    pub fn ime_requests_for_testing(
+        &self,
+    ) -> &RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>> {
+        &self.ime_requests
     }
 
     /// A point in client pixels, in logical pixels.
@@ -732,6 +760,14 @@ impl WindowAdapter for Win32WindowAdapter {
 
         let constraints = properties.layout_constraints();
         self.constraints.set(constraints);
+        if self.detached {
+            // As upstream's testing window: the preferred size, once, without resizing the
+            // window item. Upstream's cases depend on it.
+            if !self.size_set.replace(true) {
+                self.size.set(constraints.preferred.to_physical(self.window.scale_factor()));
+            }
+            return;
+        }
         let current = self.size.get().to_logical(self.window.scale_factor());
         // Without a size of its own, the window takes the layout's preferred size;
         // an axis the layout has no preference for keeps the default.
@@ -766,6 +802,7 @@ impl WindowAdapterInternal for Win32WindowAdapter {
         &self,
         cursor: crate::cursor::MouseCursorInner,
     ) -> crate::cursor::MouseCursorHandling {
+        self.cursor_request.replace(cursor.clone());
         match cursor {
             crate::cursor::MouseCursorInner::BuiltIn(cursor) => self.mouse.set_cursor(cursor),
             // Images come with Phase 5.
@@ -774,7 +811,15 @@ impl WindowAdapterInternal for Win32WindowAdapter {
         crate::cursor::MouseCursorHandling::Platform
     }
 
+    fn input_method_request(&self, request: crate::window::InputMethodRequest) {
+        // The input method comes with Phase 4.
+        if self.detached {
+            self.ime_requests.borrow_mut().push(request);
+        }
+    }
+
     fn start_window_move(&self) {
+        self.window_move_requests.set(self.window_move_requests.get() + 1);
         if let Some(hwnd) = self.hwnd.get() {
             input::start_window_move(hwnd);
         }

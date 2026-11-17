@@ -106,8 +106,8 @@ pub fn update_all_translations() {
 /// The types that the `Window` API uses to talk about the windowing system.
 pub mod platform {
     pub use i_slint_core::platform::{
-        Clipboard, EventLoopProxy, PlatformError, SetPlatformError, WindowEvent,
-        WindowEventDispatchResult, duration_until_next_timer_update,
+        Clipboard, EventLoopProxy, Key, PlatformError, PointerEventButton, SetPlatformError,
+        WindowEvent, WindowEventDispatchResult, duration_until_next_timer_update,
         update_timers_and_animations,
     };
     pub use i_slint_core::platform::{LayoutConstraints, WindowAdapter, WindowProperties};
