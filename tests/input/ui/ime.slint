@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Two text inputs, for what happens to a composition when the focus leaves one.
+export component ImeTest inherits Window {
+    width: 200px;
+    height: 100px;
+
+    out property <string> first-text: first.text;
+    out property <string> second-text: second.text;
+    out property <bool> first-focused: first.has-focus;
+
+    public function focus-first() {
+        first.focus();
+    }
+
+    public function focus-second() {
+        second.focus();
+    }
+
+    first := TextInput {
+        y: 0px;
+        height: 50px;
+    }
+
+    second := TextInput {
+        y: 50px;
+        height: 50px;
+    }
+}

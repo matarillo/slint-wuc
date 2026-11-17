@@ -1604,8 +1604,16 @@ impl Item for TextInput {
                         .set(self.as_ref().cursor_position_byte_offset());
                 }
                 WindowInner::from_pub(window_adapter.window()).set_text_input_focused(false);
-                if !self.read_only() {
+                // Upstream drops the composition. This input follows TSF instead, which the host
+                // may move to: a composition is committed when the focus moves (the input
+                // method cancels its side when the text input focus ends above), and kept while
+                // the window is inactive, as the input method keeps it then.
+                if !self.read_only() && *reason != FocusReason::WindowActivation {
+                    let preedit = self.preedit_text();
                     self.preedit_text.set(Default::default());
+                    if self.accept_text_input(&preedit, window_adapter) {
+                        self.insert(&preedit, window_adapter, self_rc);
+                    }
                 }
             }
         }

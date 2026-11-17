@@ -2,8 +2,13 @@
 
 //! The input method, through IMM32 as winit (and so upstream on Windows) uses it (S4).
 //!
-//! The rest of the host only calls [`window_created`], [`request`] and [`handle`], so that a TSF
-//! implementation can replace this module (for reconversion, for example).
+//! The rest of the host only calls [`window_created`], [`request`], [`handle`] and
+//! [`deactivating`], so that a TSF implementation can replace this module (for reconversion,
+//! for example).
+//!
+//! Compositions behave as TSF handles them, so that moving to TSF changes nothing for
+//! applications: a focus move commits the composition (the text input inserts its preedit text
+//! when it loses the focus), and deactivating the window keeps it.
 //!
 //! The text input draws the composition itself, inline: the system's composition window is
 //! hidden, and the candidate list is placed below the caret.
@@ -38,6 +43,18 @@ pub(super) struct Ime {
     composing: Cell<bool>,
     /// The caret, in physical client pixels, for placing the candidate list.
     caret: Cell<RECT>,
+    /// Set while Slint hears that the window is no longer active.
+    deactivating: Cell<bool>,
+}
+
+/// Runs `dispatch`, which tells Slint that the window is no longer active.
+///
+/// The focused text input then ends the text input focus but keeps its preedit text, and the
+/// input method keeps the composition: the user continues it when the window is active again.
+pub(super) fn deactivating(adapter: &Win32WindowAdapter, dispatch: impl FnOnce()) {
+    let was = adapter.ime.deactivating.replace(true);
+    dispatch();
+    adapter.ime.deactivating.set(was);
 }
 
 /// A new window takes no input method text until a text input asks for it, as in winit.
@@ -61,6 +78,8 @@ pub(super) fn request(adapter: &Win32WindowAdapter, hwnd: HWND, request: &InputM
             props
         }
         InputMethodRequest::Update(props) if ime.enabled.get() => props,
+        // The window comes back to the same text input, which enables it again.
+        InputMethodRequest::Disable if ime.deactivating.get() => return,
         InputMethodRequest::Disable => {
             disable(ime, hwnd);
             return;
@@ -201,8 +220,8 @@ fn disable(ime: &Ime, hwnd: HWND) {
     if !ime.enabled.replace(false) {
         return;
     }
-    // The text input that had the focus dropped its preedit text; the input method drops the
-    // composition too, rather than committing it into the next focused input.
+    // The text input that loses the focus commits its preedit text itself; committing here would
+    // put the text into the input that gets the focus next, or twice.
     if ime.composing.replace(false) {
         let himc = unsafe { ImmGetContext(hwnd) };
         if !himc.is_invalid() {

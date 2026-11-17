@@ -78,7 +78,13 @@ pub(super) fn handle(
                     state.dead_key.set(0);
                 });
             }
-            adapter.window.dispatch_event(WindowEvent::WindowActiveChanged(active));
+            let dispatch =
+                || adapter.window.dispatch_event(WindowEvent::WindowActiveChanged(active));
+            if active {
+                dispatch()
+            } else {
+                super::ime::deactivating(adapter, dispatch)
+            }
             // DefWindowProc gives the keyboard focus to a window that is activated.
             Some(unsafe { DefWindowProcW(hwnd, msg, wp, lp) })
         }

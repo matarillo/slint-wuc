@@ -80,7 +80,7 @@ Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is th
 ## Input Method
 
 IMM32, as winit uses it on Windows ([S4](spike-s4-text.md)).
-The code is `crates/core/host/ime.rs`; the rest of the host only calls its `window_created`, `request` and `handle`, so TSF can replace it (for reconversion, which upstream lacks too).
+The code is `crates/core/host/ime.rs`; the rest of the host only calls its `window_created`, `request`, `handle` and `deactivating`, so TSF can replace it (for reconversion, which upstream lacks too).
 
 - A new window has no input context (`ImmAssociateContextEx` with none), as in winit: typing goes to `WM_CHAR` until a text input asks for the input method.
 - `InputMethodRequest::Enable` gives the window the default context, and `Disable` takes it away.
@@ -94,8 +94,15 @@ The code is `crates/core/host/ime.rs`; the rest of the host only calls its `wind
   - The preedit selection is the clause being converted (`GCS_COMPATTR`, `ATTR_TARGET_*`), or else an empty range at `GCS_CURSORPOS`, in UTF-8 bytes, as winit computes it.
   - The message doesn't go to `DefWindowProc`, which would send the result again as `WM_IME_CHAR`.
 - `WM_IME_ENDCOMPOSITION` without a result (Escape, or every character deleted) clears the preedit text.
-- When the focus leaves a text input in the middle of a composition, the text input drops its preedit text, and `Disable` cancels the composition (`CPS_CANCEL`).
-  Committing it instead would put the text into the input that gets the focus next.
+- A composition that the focus leaves behaves as TSF handles it, since the host may move to TSF and applications shouldn't see a difference then.
+  Windows has no single convention: a classic edit control doesn't complete the composition when it loses the focus (`EIMES_COMPLETECOMPSTRKILLFOCUS` is off by default),
+  while TSF commits it when the focus moves and keeps it when the window is deactivated (Mozilla bug 1053053), and browsers mostly commit it.
+  Upstream's text input drops it in both cases; the one thing every source agrees on is that it must never move into the next focused input.
+  - **Focus moves** (a click, Tab, `focus()`, a popup): the text input inserts its preedit text when it loses the focus, and `Disable` cancels the input method's composition (`CPS_CANCEL`).
+    By the time `Disable` arrives the focus has moved, so a commit from the input method would put the text into the next focused input.
+  - **The window is deactivated**: the text input keeps its preedit text, and the host ignores the `Disable` that comes while it dispatches the deactivation, so the input method keeps the composition.
+    Activating the window again gives the focus back to the same text input, which enables the input method, and the user continues the composition.
+    An input method that ends the composition on deactivation by itself sends the result or the end message, which reach the same text input, as the focus item stays.
 
 ## Clipboard
 
