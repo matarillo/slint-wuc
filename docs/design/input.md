@@ -103,6 +103,8 @@ The code is `crates/core/host/ime.rs`; the rest of the host only calls its `wind
   - **The window is deactivated**: the text input keeps its preedit text, and the host ignores the `Disable` that comes while it dispatches the deactivation, so the input method keeps the composition.
     Activating the window again gives the focus back to the same text input, which enables the input method, and the user continues the composition.
     An input method that ends the composition on deactivation by itself sends the result or the end message, which reach the same text input, as the focus item stays.
+    The Microsoft Japanese IME does that through IMM32: it commits the composition when the window is deactivated (checked by hand), as WordPad does.
+    Through TSF it would keep it; nothing in Slint changes then.
 
 ## Clipboard
 
