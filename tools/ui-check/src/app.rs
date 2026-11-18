@@ -8,10 +8,24 @@ use std::time::Duration;
 
 /// Slint's key codes (`Key` in `slint::platform`) for the keys scenarios press.
 pub mod keys {
+    pub const CONTROL: &str = "\u{11}";
     pub const ESCAPE: &str = "\u{1b}";
     pub const UP: &str = "\u{F700}";
     pub const DOWN: &str = "\u{F701}";
+    pub const LEFT: &str = "\u{F702}";
+    pub const RIGHT: &str = "\u{F703}";
 }
+
+/// `KeyEventType` in upstream's `slint_systest.proto`.
+#[derive(Clone, Copy)]
+enum KeyEvent {
+    PressAndRelease = 0,
+    Press = 1,
+    Release = 2,
+}
+
+/// `PointerEventButton` in upstream's `slint_systest.proto`.
+const RIGHT_BUTTON: i32 = 1;
 
 pub struct App {
     client: Client,
@@ -61,9 +75,42 @@ impl App {
         Ok(())
     }
 
-    pub fn key(&mut self, text: &str) -> Result {
+    pub fn right_click(&mut self, filter: Value) -> Result {
+        let element = self.find(filter)?;
         self.client
-            .json("dispatch_key_event", json!({ "windowHandle": self.window, "text": text }))?;
+            .json("click_element", json!({ "elementHandle": element, "button": RIGHT_BUTTON }))?;
+        Ok(())
+    }
+
+    /// Moves the pointer onto the element, and waits `wait` for what hovering shows.
+    pub fn hover(&mut self, filter: Value, wait: Duration) -> Result {
+        let element = self.find(filter)?;
+        self.client.json("hover_element", json!({ "elementHandle": element }))?;
+        std::thread::sleep(wait);
+        Ok(())
+    }
+
+    pub fn key(&mut self, text: &str) -> Result {
+        self.key_event(text, KeyEvent::PressAndRelease)
+    }
+
+    /// Presses each character of `text`.
+    pub fn type_text(&mut self, text: &str) -> Result {
+        text.chars().try_for_each(|c| self.key(&c.to_string()))
+    }
+
+    /// Presses `key` while `modifier` is down.
+    pub fn key_with(&mut self, modifier: &str, key: &str) -> Result {
+        self.key_event(modifier, KeyEvent::Press)?;
+        self.key(key)?;
+        self.key_event(modifier, KeyEvent::Release)
+    }
+
+    fn key_event(&mut self, text: &str, event: KeyEvent) -> Result {
+        self.client.json(
+            "dispatch_key_event",
+            json!({ "windowHandle": self.window, "text": text, "eventType": event as i32 }),
+        )?;
         Ok(())
     }
 
