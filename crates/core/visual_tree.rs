@@ -17,8 +17,7 @@ use crate::item_rendering::{BorderRectLayout, RenderBorderRectangle};
 use crate::item_tree::{ItemTreeRc, ItemVisitorResult, ItemWeak, TraversalOrder};
 use crate::items::{ItemRc, ItemRef, RenderingResult};
 use crate::lengths::{
-    LogicalBorderRadius, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, PhysicalPx,
-    ScaleFactor,
+    LogicalBorderRadius, LogicalPoint, LogicalPx, LogicalRect, LogicalSize, PhysicalPx, ScaleFactor,
 };
 use crate::properties::PropertyTracker;
 use alloc::boxed::Box;
@@ -111,12 +110,16 @@ impl VisualUpdate<'_> {
     /// The window's scale factor, 1 without a window. Reading it makes a new scale factor
     /// update the item again.
     pub fn scale_factor(&self) -> f32 {
-        self.item
-            .and_then(|item| item.window_adapter())
-            .map_or(1., |adapter| crate::window::WindowInner::from_pub(adapter.window()).scale_factor())
+        self.item.and_then(|item| item.window_adapter()).map_or(1., |adapter| {
+            crate::window::WindowInner::from_pub(adapter.window()).scale_factor()
+        })
     }
 
-    fn brush(&self, brush: &crate::Brush, size: euclid::Size2D<f32, PhysicalPx>) -> Option<CompositionBrush> {
+    fn brush(
+        &self,
+        brush: &crate::Brush,
+        size: euclid::Size2D<f32, PhysicalPx>,
+    ) -> Option<CompositionBrush> {
         shapes::make_brush(self.compositor, brush, size, || self.scale_factor())
     }
 
@@ -246,8 +249,7 @@ impl VisualUpdate<'_> {
         if shapes::needs_sprite(&background)
             || (has_border && shapes::needs_sprite(&layout.border_color))
         {
-            let (floor, area, origin) =
-                self.clipped_covering(LogicalRect::from_size(size).cast());
+            let (floor, area, origin) = self.clipped_covering(LogicalRect::from_size(size).cast());
             if let Some(brush) = self.brush(&background, layout.brush_size)
                 && let Ok(outline) =
                     shapes::rounded_rect_path(layout.background_rect, layout.background_radius)
@@ -257,8 +259,9 @@ impl VisualUpdate<'_> {
             }
             if has_border
                 && let Some(brush) = self.brush(&layout.border_color, layout.brush_size)
-                && let Ok(outline) = shapes::rounded_rect_path(layout.border_rect, layout.border_radius)
-                    .and_then(|path| shapes::widen(&path, layout.border_width.get(), None))
+                && let Ok(outline) =
+                    shapes::rounded_rect_path(layout.border_rect, layout.border_radius)
+                        .and_then(|path| shapes::widen(&path, layout.border_width.get(), None))
             {
                 let _ =
                     shapes::append_clipped(&c, &floor, &brush, outline, area, origin, border_mode);
@@ -333,7 +336,8 @@ impl VisualUpdate<'_> {
             {
                 let _ = current.SetColor(ui_color(*color));
             } else if let Some(new) = self.brush(brush, layout.brush_size) {
-                let _ = if is_stroke { shape.SetStrokeBrush(&new) } else { shape.SetFillBrush(&new) };
+                let _ =
+                    if is_stroke { shape.SetStrokeBrush(&new) } else { shape.SetFillBrush(&new) };
             }
             if is_stroke {
                 let _ = shape.SetStrokeThickness(layout.border_width.get());
@@ -430,7 +434,8 @@ impl VisualUpdate<'_> {
         // clipped back to the item.
         let margin = (3. * sigma).ceil();
         let _ = sprite.SetOffset(Vector3 { X: -margin, Y: -margin, Z: 0. });
-        let _ = sprite.SetSize(Vector2 { X: size.width + 2. * margin, Y: size.height + 2. * margin });
+        let _ =
+            sprite.SetSize(Vector2 { X: size.width + 2. * margin, Y: size.height + 2. * margin });
         // The compositor scales the blur with the visual, and the root carries the scale factor.
         match sprite.Brush().and_then(|b| b.cast::<CompositionEffectBrush>()) {
             Ok(brush) => {
@@ -682,8 +687,7 @@ impl VisualTree {
                 }
                 let Node { visual, kind, content, result, floor, .. } = node;
                 if content.is_dirty() || resized {
-                    let mut update =
-                        VisualUpdate {
+                    let mut update = VisualUpdate {
                         compositor: &self.compositor,
                         item: Some(&item_rc),
                         visual,

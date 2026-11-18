@@ -85,7 +85,8 @@ fn update(
     // A scalable image is rasterized at the size it's shown at, magnified by the transforms
     // above it as upstream's renderers do (#10903); others at their own size.
     let raster = if <&ImageInner>::from(&source).is_svg() {
-        let image_fit = if tiling != Default::default() { ImageFit::Preserve } else { image.image_fit() };
+        let image_fit =
+            if tiling != Default::default() { ImageFit::Preserve } else { image.image_fit() };
         let magnification = magnification(item_rc);
         transformed_scalable_render_size(
             source_size,
@@ -154,10 +155,9 @@ fn update(
         );
         let whole = IntRect::from_size(raster.cast());
         let (part, transform) = match fit.tiled {
-            Some(tiled) => (
-                clip,
-                Matrix3x2::translation(-(tiled.x as f32), -(tiled.y as f32)) * raster_scale,
-            ),
+            Some(tiled) => {
+                (clip, Matrix3x2::translation(-(tiled.x as f32), -(tiled.y as f32)) * raster_scale)
+            }
             None => (
                 whole,
                 Matrix3x2::translation(-(clip.origin.x as f32), -(clip.origin.y as f32))
@@ -394,7 +394,12 @@ fn surface(
     let key = Key {
         data,
         raster: (raster.width, raster.height),
-        part: (part.origin.x as u32, part.origin.y as u32, part.width() as u32, part.height() as u32),
+        part: (
+            part.origin.x as u32,
+            part.origin.y as u32,
+            part.width() as u32,
+            part.height() as u32,
+        ),
     };
     let generation = graphics.device_generation();
     let cached = SURFACES.with(|s| {

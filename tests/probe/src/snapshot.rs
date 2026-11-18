@@ -16,7 +16,13 @@ fn main() {
         .join("../../reference/slint-1.19.0/tests/screenshots/references/skia");
     check(&out, &references, "image/images", (64, 64), &Images::new().unwrap());
     check(&out, &references, "image/border-image", (64, 64), &BorderImage::new().unwrap());
-    check(&out, &references, "image/image-repeat-colorize", (64, 64), &ImageRepeatColorize::new().unwrap());
+    check(
+        &out,
+        &references,
+        "image/image-repeat-colorize",
+        (64, 64),
+        &ImageRepeatColorize::new().unwrap(),
+    );
     check(&out, &references, "image/images-alignment", (64, 64), &ImagesAlignment::new().unwrap());
     check(&out, &references, "basic/backdrop-blur", (128, 112), &BackdropBlur::new().unwrap());
 }

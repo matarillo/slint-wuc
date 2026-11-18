@@ -90,7 +90,8 @@ fn conic_brush(
     size: euclid::Size2D<f32, PhysicalPx>,
     scale: f32,
 ) -> windows::core::Result<CompositionBrush> {
-    let graphics = super::graphics::graphics(c).ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+    let graphics =
+        super::graphics::graphics(c).ok_or_else(|| windows::core::Error::from(E_FAIL))?;
     graphics.track_device();
     // The compositor samples the bitmap between its pixels where the item lies at a fractional
     // pixel. A denser bitmap keeps that blend narrow where colors change abruptly.
@@ -139,7 +140,12 @@ fn premultiplied_stops(from: &[GradientStop]) -> Vec<(f32, crate::Color)> {
         [c.red() as f32, c.green() as f32, c.blue() as f32, c.alpha() as f32 / 255.]
     };
     let color = |[r, g, b, a]: [f32; 4]| {
-        crate::Color::from_argb_u8((a * 255.).round() as u8, r.round() as u8, g.round() as u8, b.round() as u8)
+        crate::Color::from_argb_u8(
+            (a * 255.).round() as u8,
+            r.round() as u8,
+            g.round() as u8,
+            b.round() as u8,
+        )
     };
     let [first, ..] = from else { return Vec::new() };
     if from.len() == 1 {
@@ -431,9 +437,8 @@ pub(super) fn describe_brush(brush: &CompositionBrush) -> alloc::string::String 
     }
     if let Ok(b) = brush.cast::<windows::UI::Composition::CompositionEffectBrush>() {
         // The effect graph isn't readable back; its sources are.
-        let source = |name: &str| {
-            b.GetSourceParameter(&name.into()).ok().map(|s| describe_brush(&s))
-        };
+        let source =
+            |name: &str| b.GetSourceParameter(&name.into()).ok().map(|s| describe_brush(&s));
         let mut out = alloc::string::String::from("effect(");
         if let Some(image) = source("image") {
             out += &image;

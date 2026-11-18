@@ -192,9 +192,9 @@ pub mod re_exports {
     pub use core::result::{Result, Result::*};
     pub use i_slint_core::styled_text::{StyledText, parse_markdown};
     // This one is empty when Qt is not available, which triggers a warning
-    pub use euclid::approxeq::ApproxEq;
     #[allow(unused_imports)]
     pub use super::native_widgets::*;
+    pub use euclid::approxeq::ApproxEq;
     pub use i_slint_core::accessibility::{
         AccessibilityAction, AccessibleStringProperty, SupportedAccessibilityAction,
     };
@@ -246,5 +246,4 @@ pub mod re_exports {
     pub use once_cell::unsync::OnceCell;
     pub use pin_weak::rc::PinWeak;
     pub use vtable::{self, *};
-
 }

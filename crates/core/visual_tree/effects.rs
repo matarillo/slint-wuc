@@ -37,11 +37,21 @@ use windows_collections::IIterable;
 pub(crate) enum Effect {
     /// Filled by [`brush`]'s sources.
     Source(&'static str),
-    GaussianBlur { sigma: f32, input: Box<Effect> },
+    GaussianBlur {
+        sigma: f32,
+        input: Box<Effect>,
+    },
     /// Repeats the input outside its bounds along the axes that wrap; clamps along the others.
-    Tile { x: bool, y: bool, input: Box<Effect> },
+    Tile {
+        x: bool,
+        y: bool,
+        input: Box<Effect>,
+    },
     /// `source` where `destination` is opaque, with the destination's alpha.
-    SourceIn { destination: Box<Effect>, source: Box<Effect> },
+    SourceIn {
+        destination: Box<Effect>,
+        source: Box<Effect>,
+    },
 }
 
 impl Effect {
@@ -92,10 +102,11 @@ impl Effect {
             effect.cast().unwrap()
         };
         let edge = |wrap: bool| {
-            Prop::U32(
-                if wrap { D2D1_BORDER_EDGE_MODE_WRAP.0 } else { D2D1_BORDER_EDGE_MODE_CLAMP.0 }
-                    as u32,
-            )
+            Prop::U32(if wrap {
+                D2D1_BORDER_EDGE_MODE_WRAP.0
+            } else {
+                D2D1_BORDER_EDGE_MODE_CLAMP.0
+            } as u32)
         };
         match self {
             Effect::Source(name) => CompositionEffectSourceParameter::Create(&(*name).into())
@@ -217,7 +228,8 @@ impl IGraphicsEffectD2D1Interop_Impl for D2DEffect_Impl {
         index: *mut u32,
         mapping: *mut GRAPHICS_EFFECT_PROPERTY_MAPPING,
     ) -> Result<()> {
-        let name = unsafe { name.to_string() }.map_err(|_| windows::core::Error::from(E_INVALIDARG))?;
+        let name =
+            unsafe { name.to_string() }.map_err(|_| windows::core::Error::from(E_INVALIDARG))?;
         let i = self
             .props
             .iter()

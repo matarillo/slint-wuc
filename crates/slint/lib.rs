@@ -39,9 +39,7 @@ pub use i_slint_core::translations::{SelectBundledTranslationError, select_bundl
 pub mod private_unstable_api;
 
 /// Runs `f` with this thread's context, creating the Win32 host on first use.
-fn with_context<R>(
-    f: impl FnOnce(&i_slint_core::SlintContext) -> R,
-) -> Result<R, PlatformError> {
+fn with_context<R>(f: impl FnOnce(&i_slint_core::SlintContext) -> R) -> Result<R, PlatformError> {
     let mut platform_created = false;
     let result = i_slint_core::with_global_context(
         || {

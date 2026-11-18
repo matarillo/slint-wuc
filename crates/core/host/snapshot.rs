@@ -155,7 +155,8 @@ impl Capturer {
         let (d3d, context) =
             create(D3D_DRIVER_TYPE_HARDWARE).or_else(|_| create(D3D_DRIVER_TYPE_WARP))?;
         let dxgi: IDXGIDevice = d3d.cast()?;
-        let device: IDirect3DDevice = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi)? }.cast()?;
+        let device: IDirect3DDevice =
+            unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi)? }.cast()?;
         Ok(Self { d3d, context, device })
     }
 }

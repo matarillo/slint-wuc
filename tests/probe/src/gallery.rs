@@ -34,10 +34,11 @@ fn filter_sort_model(
     let mut model = source_model.clone();
     if !filter.is_empty() {
         let filter = filter.to_lowercase();
-        model = Rc::new(source_model.filter(move |e| {
-            e.row_data(0).unwrap().text.to_lowercase().contains(filter.as_str())
-        }))
-        .into();
+        model =
+            Rc::new(source_model.filter(move |e| {
+                e.row_data(0).unwrap().text.to_lowercase().contains(filter.as_str())
+            }))
+            .into();
     }
     if sort_index >= 0 {
         model = Rc::new(model.clone().sort_by(move |r_a, r_b| {

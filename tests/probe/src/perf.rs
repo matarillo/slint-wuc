@@ -43,7 +43,10 @@ unsafe impl std::alloc::GlobalAlloc for Counting {
         unsafe { std::alloc::System.dealloc(ptr, layout) }
     }
     unsafe fn realloc(&self, ptr: *mut u8, layout: std::alloc::Layout, new_size: usize) -> *mut u8 {
-        HEAP.fetch_add(new_size as isize - layout.size() as isize, std::sync::atomic::Ordering::Relaxed);
+        HEAP.fetch_add(
+            new_size as isize - layout.size() as isize,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         unsafe { std::alloc::System.realloc(ptr, layout, new_size) }
     }
 }

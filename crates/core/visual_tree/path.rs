@@ -9,6 +9,7 @@ use super::{VisualUpdate, shapes};
 use crate::items::{FillRule, ItemRc, LineCap, LineJoin, Path};
 use crate::lengths::LogicalSize;
 use crate::window::WindowInner;
+use alloc::vec::Vec;
 use core::pin::Pin;
 use lyon_path::Event;
 use lyon_path::math::Point;
@@ -27,7 +28,6 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_LINE_JOIN_ROUND, D2D1_QUADRATIC_BEZIER_SEGMENT, D2D1_STROKE_STYLE_PROPERTIES,
     ID2D1Factory, ID2D1Geometry, ID2D1StrokeStyle,
 };
-use alloc::vec::Vec;
 use windows::core::Interface;
 use windows_numerics::{Matrix3x2, Vector2};
 
@@ -81,8 +81,7 @@ fn update(
     } else {
         shapes::make_brush(&compositor, &path.fill(), size_f, || visual.scale_factor())
     };
-    let stroke =
-        shapes::make_brush(&compositor, &path.stroke(), size_f, || visual.scale_factor());
+    let stroke = shapes::make_brush(&compositor, &path.stroke(), size_f, || visual.scale_factor());
     if fill.is_none() && stroke.is_none() {
         return Ok(false);
     }
@@ -122,7 +121,9 @@ fn update(
         if !path.clip() {
             return Ok(None);
         }
-        Ok(Some(compositor.CreateInsetClipWithInsets(origin.X, origin.Y, origin.X, origin.Y)?.cast()?))
+        Ok(Some(
+            compositor.CreateInsetClipWithInsets(origin.X, origin.Y, origin.X, origin.Y)?.cast()?,
+        ))
     };
 
     if clipped {

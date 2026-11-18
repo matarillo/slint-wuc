@@ -426,7 +426,8 @@ impl IntrospectionState {
         if let WindowEvent::KeyPressed { .. }
         | WindowEvent::KeyPressRepeated { .. }
         | WindowEvent::KeyReleased { .. } = &event
-            && let Some(host) = i_slint_core::host::Win32WindowAdapter::from_window(adapter.window())
+            && let Some(host) =
+                i_slint_core::host::Win32WindowAdapter::from_window(adapter.window())
         {
             adapter = host.key_window();
         }

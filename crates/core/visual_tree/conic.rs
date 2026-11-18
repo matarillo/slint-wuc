@@ -85,10 +85,8 @@ mod tests {
 
     #[test]
     fn translucent_stops_mix_premultiplied() {
-        let stops = gradient(&[
-            (Color::from_argb_u8(0, 0, 0, 0), 0.),
-            (Color::from_rgb_u8(255, 0, 0), 1.),
-        ]);
+        let stops =
+            gradient(&[(Color::from_argb_u8(0, 0, 0, 0), 0.), (Color::from_rgb_u8(255, 0, 0), 1.)]);
         let stops: Vec<[f32; 5]> = stops.iter().map(premultiplied).collect();
         // Half way: half the red, at half the alpha, with no black mixed in.
         assert_eq!(color_at(&stops, 0.5), [0.5, 0., 0., 0.5]);
