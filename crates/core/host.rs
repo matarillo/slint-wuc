@@ -538,8 +538,7 @@ impl Win32WindowAdapter {
         kind: crate::window::WindowKind,
     ) -> Result<Rc<Self>, PlatformError> {
         let compositor = parent.renderer.tree.borrow().compositor().clone();
-        let popup =
-            popup::Popup { parent: parent.self_weak.clone(), kind, position: Cell::new(None) };
+        let popup = popup::Popup::new(parent.self_weak.clone(), kind);
         let this = Self::with_mode(&compositor, parent.detached, Some(popup))?;
         this.native_popup.set(parent.native_popup.get());
         this.renderer.fixed_test_font.set(parent.renderer.fixed_test_font.get());
@@ -647,6 +646,11 @@ impl Win32WindowAdapter {
             };
             RegisterClassW(&class);
             let size = self.size.get();
+            if let Some(popup) = &self.popup {
+                let scale = self.window.scale_factor();
+                popup.update_margin(self.inner(), size.to_logical(scale), scale);
+            }
+            let margin = self.margin();
             let (style, ex_style) = match &self.popup {
                 Some(_) => (popup::Popup::STYLE, popup::Popup::EX_STYLE),
                 None => (WS_OVERLAPPEDWINDOW, WS_EX_NOREDIRECTIONBITMAP),
@@ -654,10 +658,15 @@ impl Win32WindowAdapter {
             let mut rc =
                 RECT { left: 0, top: 0, right: size.width as i32, bottom: size.height as i32 };
             let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, GetDpiForSystem());
-            let frame = (rc.right - rc.left, rc.bottom - rc.top);
+            let frame = (
+                rc.right - rc.left + margin.left + margin.right,
+                rc.bottom - rc.top + margin.top + margin.bottom,
+            );
             let (position, owner) = match &self.popup {
                 Some(popup) => (
-                    popup.screen_position(frame).unwrap_or_default(),
+                    popup
+                        .screen_position((size.width as i32, size.height as i32))
+                        .unwrap_or_default(),
                     popup.parent.upgrade().and_then(|p| p.hwnd.get()),
                 ),
                 None => (POINT { x: CW_USEDEFAULT, y: CW_USEDEFAULT }, None),
@@ -694,13 +703,14 @@ impl Win32WindowAdapter {
         let target = unsafe { interop.CreateDesktopWindowTarget(hwnd, false) }.map_err(err)?;
         target.SetRoot(renderer.tree.borrow().root()).map_err(err)?;
         *self.target.borrow_mut() = Some(target);
+        self.offset_root();
         let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
         self.scale_factor_changed(scale);
         // The window was created for the system DPI; a requested size applies again at the
         // window's own DPI.
         match self.requested_size.take() {
             Some(size) => self.set_size(size),
-            None => self.resized(client_size(hwnd)),
+            None => self.resized(self.content_size(client_size(hwnd))),
         }
         Ok(hwnd)
     }
@@ -780,10 +790,51 @@ impl Win32WindowAdapter {
         }
     }
 
+    /// The room around a popup for what it draws past its edges; none for other windows.
+    fn margin(&self) -> popup::Margin {
+        self.popup.as_ref().map(|p| p.margin.get()).unwrap_or_default()
+    }
+
+    /// The size of what the core lays out in a client area of `client` pixels.
+    fn content_size(&self, client: PhysicalSize) -> PhysicalSize {
+        let margin = self.margin();
+        PhysicalSize::new(
+            client.width.saturating_sub((margin.left + margin.right) as u32),
+            client.height.saturating_sub((margin.top + margin.bottom) as u32),
+        )
+    }
+
+    /// Moves the visuals past the margin.
+    fn offset_root(&self) {
+        let margin = self.margin();
+        let offset =
+            windows_numerics::Vector3 { X: margin.left as f32, Y: margin.top as f32, Z: 0. };
+        let _ = self.root_visual().SetOffset(offset);
+    }
+
+    /// Fits a popup's window to its margin, after the margin changed.
+    fn margin_changed(&self) {
+        self.offset_root();
+        let (Some(popup), Some(hwnd)) = (&self.popup, self.hwnd.get()) else { return };
+        let size = self.size.get();
+        let Some(p) = popup.screen_position((size.width as i32, size.height as i32)) else {
+            return;
+        };
+        let (width, height) = self.frame_size(hwnd, size, self.dpi());
+        unsafe {
+            let _ =
+                SetWindowPos(hwnd, None, p.x, p.y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+
     /// A point in client pixels, in logical pixels.
     fn logical_point(&self, point: POINT) -> crate::lengths::LogicalPoint {
         let scale = self.window.scale_factor();
-        crate::lengths::LogicalPoint::new(point.x as f32 / scale, point.y as f32 / scale)
+        let margin = self.margin();
+        crate::lengths::LogicalPoint::new(
+            (point.x - margin.left) as f32 / scale,
+            (point.y - margin.top) as f32 / scale,
+        )
     }
 
     /// The window's DPI, or the one its scale factor stands for while it has no HWND.
@@ -813,7 +864,11 @@ impl Win32WindowAdapter {
             let ex_style = WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32);
             let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, dpi);
         }
-        (rc.right - rc.left, rc.bottom - rc.top)
+        let margin = self.margin();
+        (
+            rc.right - rc.left + margin.left + margin.right,
+            rc.bottom - rc.top + margin.top + margin.bottom,
+        )
     }
 
     fn scale_factor_changed(&self, scale: f32) {
@@ -842,6 +897,14 @@ impl Win32WindowAdapter {
             tree.sync(trees)
         });
         drop(tree);
+        if let Some(popup) = &self.popup
+            && self.hwnd.get().is_some()
+        {
+            let scale = self.window.scale_factor();
+            if popup.update_margin(inner, self.size.get().to_logical(scale), scale) {
+                self.margin_changed();
+            }
+        }
         if inner.has_active_animations() {
             request_frame();
         }
@@ -881,7 +944,8 @@ impl WindowAdapter for Win32WindowAdapter {
     fn position(&self) -> Option<PhysicalPosition> {
         let mut rc = RECT::default();
         unsafe { GetWindowRect(self.hwnd.get()?, &mut rc) }.ok()?;
-        Some(PhysicalPosition::new(rc.left, rc.top))
+        let margin = self.margin();
+        Some(PhysicalPosition::new(rc.left + margin.left, rc.top + margin.top))
     }
 
     fn set_position(&self, position: WindowPosition) {
@@ -1086,7 +1150,7 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     };
     match &adapter.popup {
         Some(popup) => {
-            if let Some(result) = popup::handle(popup, msg, wp, lp) {
+            if let Some(result) = popup::handle(&adapter, popup, hwnd, msg, lp) {
                 return result;
             }
         }
@@ -1110,7 +1174,8 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         WM_SIZE if wp.0 != SIZE_MINIMIZED as usize => {
-            let size = PhysicalSize::new((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
+            let client = PhysicalSize::new((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
+            let size = adapter.content_size(client);
             // A size that the intended logical size doesn't explain comes from the user.
             let intended = adapter.logical_size.get().map(|l| to_physical(l, adapter.dpi()));
             let from_user = !adapter.in_dpi_change.get() && intended != Some(size);
@@ -1180,7 +1245,7 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             // `SetWindowPos` sends no WM_SIZE when the physical size stays the same, and the
             // logical size must follow the new scale anyway.
-            let client = client_size(hwnd);
+            let client = adapter.content_size(client_size(hwnd));
             trace_dpi(format_args!(
                 "WM_DPICHANGED done: client {}x{}",
                 client.width, client.height

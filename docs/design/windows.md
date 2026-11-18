@@ -19,6 +19,10 @@ A popup then isn't cut off at the edge of its window, which a combo box near the
   A tooltip answers `WM_NCHITTEST` with `HTTRANSPARENT`, so the mouse goes through it to its owner.
 - It has a composition target of its own.
   Where the popup draws nothing, it's transparent, so rounded corners and shadows that the style draws show as drawn.
+- The window is larger than the popup by a margin: room for what its items draw past its edges, such as the drop shadow of Fluent's menus.
+  Drawn inside its parent, upstream shows that too.
+  The host takes the margin from the items' bounding rectangles, again when they change.
+  The margin answers `WM_NCHITTEST` with `HTTRANSPARENT`, so a click there is outside the popup.
 - The core gives the position in the parent's logical client coordinates.
   The host maps it to the screen with the parent's scale factor, then moves the popup into the work area of the parent's monitor.
   Windows menus do the same.

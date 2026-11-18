@@ -3,12 +3,17 @@
 //! Popup windows: `docs/design/windows.md`.
 
 use super::Win32WindowAdapter;
-use crate::api::LogicalPosition;
+use crate::api::{LogicalPosition, LogicalSize};
+use crate::item_tree::ItemRc;
 use crate::items::PopupClosePolicy;
+use crate::lengths::LogicalRect;
+use crate::properties::PropertyTracker;
 use crate::window::{PopupWindowLocation, WindowAdapter, WindowInner, WindowKind};
+use alloc::boxed::Box;
 use alloc::rc::{Rc, Weak};
 use alloc::vec::Vec;
 use core::cell::Cell;
+use core::pin::Pin;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DWM_WINDOW_CORNER_PREFERENCE, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
@@ -16,6 +21,7 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
+    ScreenToClient,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -25,15 +31,39 @@ pub(super) struct Popup {
     pub(super) kind: WindowKind,
     /// The position in the parent's logical client coordinates, as the core last set it.
     pub(super) position: Cell<Option<LogicalPosition>>,
+    /// The room around the popup, in physical pixels, for what its items draw past its edges,
+    /// such as drop shadows: drawn inside its parent, upstream shows them.
+    pub(super) margin: Cell<Margin>,
+    margin_tracker: Pin<Box<PropertyTracker>>,
+}
+
+/// Room on each side of a rectangle, in physical pixels.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub(super) struct Margin {
+    pub(super) left: i32,
+    pub(super) top: i32,
+    pub(super) right: i32,
+    pub(super) bottom: i32,
 }
 
 impl Popup {
+    pub(super) fn new(parent: Weak<Win32WindowAdapter>, kind: WindowKind) -> Self {
+        Self {
+            parent,
+            kind,
+            position: Cell::new(None),
+            margin: Cell::new(Margin::default()),
+            margin_tracker: Box::pin(PropertyTracker::default()),
+        }
+    }
+
     pub(super) const STYLE: WINDOW_STYLE = WS_POPUP;
     pub(super) const EX_STYLE: WINDOW_EX_STYLE =
         WINDOW_EX_STYLE(WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0 | WS_EX_NOREDIRECTIONBITMAP.0);
 
-    /// The top-left corner of a popup of `size` physical pixels, in screen pixels: the position
-    /// the core asked for, moved into the work area of the parent's monitor.
+    /// The top-left corner of the window of a popup of `size` physical pixels, in screen
+    /// pixels: the popup goes where the core asked for, moved into the work area of the
+    /// parent's monitor, and its margin around it.
     pub(super) fn screen_position(&self, size: (i32, i32)) -> Option<POINT> {
         let parent = self.parent.upgrade()?;
         let parent_hwnd = parent.hwnd.get()?;
@@ -48,8 +78,54 @@ impl Popup {
                 point = keep_inside(point, size, info.rcWork);
             }
         }
-        Some(point)
+        let margin = self.margin.get();
+        Some(POINT { x: point.x - margin.left, y: point.y - margin.top })
     }
+
+    /// Computes the margin again if what it depends on changed, and tells whether it did.
+    pub(super) fn update_margin(
+        &self,
+        window: &WindowInner,
+        size: LogicalSize,
+        scale: f32,
+    ) -> bool {
+        if !self.margin_tracker.is_dirty() {
+            return false;
+        }
+        let bounds = self.margin_tracker.as_ref().evaluate(|| drawn_bounds(window, size));
+        let px = |v: f32| (v.max(0.) * scale).ceil() as i32;
+        let margin = Margin {
+            left: px(-bounds.min_x()),
+            top: px(-bounds.min_y()),
+            right: px(bounds.max_x() - size.width),
+            bottom: px(bounds.max_y() - size.height),
+        };
+        self.margin.replace(margin) != margin
+    }
+}
+
+/// The rectangle that the items of `window`, of `size`, draw into, in its logical coordinates.
+fn drawn_bounds(window: &WindowInner, size: LogicalSize) -> LogicalRect {
+    let mut bounds = LogicalRect::from_size(size.to_euclid());
+    let Some(component) = window.try_component() else { return bounds };
+    let adapter = window.window_adapter();
+    let mut pending = Vec::from([ItemRc::new_root(component)]);
+    while let Some(item) = pending.pop() {
+        let mut child = item.first_child();
+        while let Some(c) = child {
+            let rect = c.bounding_rect(&c.geometry(), &adapter);
+            if !rect.is_empty() {
+                let origin = c.map_to_window(rect.origin);
+                bounds = bounds.union(&LogicalRect::new(origin, rect.size));
+            }
+            // What a clipping item holds stays inside its bounds.
+            if !c.borrow().as_ref().clips_children() {
+                pending.push(c.clone());
+            }
+            child = c.next_sibling();
+        }
+    }
+    bounds
 }
 
 /// `point` moved so that a rectangle of `size` there lies inside `area`, or starts at its
@@ -81,15 +157,36 @@ pub(super) fn created(hwnd: HWND) {
 }
 
 /// The messages of a popup's own window.
-pub(super) fn handle(popup: &Popup, msg: u32, _wp: WPARAM, _lp: LPARAM) -> Option<LRESULT> {
+pub(super) fn handle(
+    adapter: &Win32WindowAdapter,
+    popup: &Popup,
+    hwnd: HWND,
+    msg: u32,
+    lp: LPARAM,
+) -> Option<LRESULT> {
     match msg {
         WM_MOUSEACTIVATE => Some(LRESULT(MA_NOACTIVATE as isize)),
-        // A tooltip lets the mouse through to the window below it, which is in this thread.
-        WM_NCHITTEST if matches!(popup.kind, WindowKind::ToolTip) => {
+        // A tooltip and the margin let the mouse through to the window below, which is in this
+        // thread: there, a click is outside the popup.
+        WM_NCHITTEST
+            if matches!(popup.kind, WindowKind::ToolTip) || !in_popup(adapter, popup, hwnd, lp) =>
+        {
             Some(LRESULT(HTTRANSPARENT as isize))
         }
         _ => None,
     }
+}
+
+/// Whether the screen point in `lp` is on the popup rather than in its margin.
+fn in_popup(adapter: &Win32WindowAdapter, popup: &Popup, hwnd: HWND, lp: LPARAM) -> bool {
+    let mut point = super::input::point_from_lparam(lp);
+    unsafe {
+        let _ = ScreenToClient(hwnd, &mut point);
+    }
+    let margin = popup.margin.get();
+    let size = adapter.size.get();
+    (margin.left..margin.left + size.width as i32).contains(&point.x)
+        && (margin.top..margin.top + size.height as i32).contains(&point.y)
 }
 
 /// The messages of a window that may own popups: what dismisses them, besides the clicks and

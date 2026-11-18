@@ -234,7 +234,7 @@ fn handled(msg: u32) -> LRESULT {
 }
 
 /// The signed coordinates that mouse messages pack into `lParam`.
-fn point_from_lparam(lp: LPARAM) -> POINT {
+pub(super) fn point_from_lparam(lp: LPARAM) -> POINT {
     POINT {
         x: (lp.0 & 0xffff) as u16 as i16 as i32,
         y: ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32,

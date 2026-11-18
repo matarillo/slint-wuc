@@ -86,7 +86,11 @@ pub(super) fn request(adapter: &Win32WindowAdapter, hwnd: HWND, request: &InputM
         }
         _ => return,
     };
-    ime.caret.set(caret_rect(props, adapter.window.scale_factor()));
+    let mut caret = caret_rect(props, adapter.window.scale_factor());
+    let margin = adapter.margin();
+    (caret.left, caret.right) = (caret.left + margin.left, caret.right + margin.left);
+    (caret.top, caret.bottom) = (caret.top + margin.top, caret.bottom + margin.top);
+    ime.caret.set(caret);
     place_windows(hwnd, ime.caret.get());
 }
 

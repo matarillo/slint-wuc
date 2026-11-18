@@ -2,3 +2,4 @@ reference/
 /target/
 **/target/
 /spikes/out/
+/manual-checks/
