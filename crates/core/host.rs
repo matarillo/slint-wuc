@@ -57,6 +57,7 @@ pub mod pointer;
 mod popup;
 mod snapshot;
 mod test_font;
+mod theme;
 
 const WM_APP_INVOKE: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
@@ -714,6 +715,7 @@ impl Win32WindowAdapter {
         };
         self.hwnd.set(Some(hwnd));
         ime::window_created(hwnd);
+        theme::apply(&self.window, hwnd);
         let renderer = &self.renderer;
         let compositor = renderer.tree.borrow().compositor().clone();
         let interop: ICompositorDesktopInterop = compositor.cast().map_err(err)?;
@@ -1299,6 +1301,11 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_CLOSE => {
             adapter.window.dispatch_event(WindowEvent::CloseRequested);
             LRESULT(0)
+        }
+        // The app mode, a high contrast theme, or the accent color may have changed.
+        WM_SETTINGCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
+            theme::apply(&adapter.window, hwnd);
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
     }

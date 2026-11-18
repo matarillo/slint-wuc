@@ -59,11 +59,16 @@ AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `acc
 - `WM_GETOBJECT` goes to the AccessKit adapter.
 - Each popup window exposes its own tree.
 
-## Scale Factor
+## System Settings
 
-`SLINT_SCALE_FACTOR` sets every window's scale factor instead of its monitor's, as in upstream's winit backend.
-Logical sizes convert at that factor, and `WM_DPICHANGED` no longer changes it.
-The window frame keeps the monitor's DPI.
+- Color scheme and accent color, as upstream's winit backend reports them on Windows.
+  - The color scheme is dark when the app mode is dark and no high contrast theme is on.
+  - The accent color is the DWM colorization color.
+  - The host reports both to the context when it creates a window, and again on `WM_SETTINGCHANGE` and `WM_DWMCOLORIZATIONCOLORCHANGED`.
+  - The title bar follows the color scheme (`DWMWA_USE_IMMERSIVE_DARK_MODE`).
+- `SLINT_SCALE_FACTOR` sets every window's scale factor instead of its monitor's, as in upstream's winit backend.
+  Logical sizes convert at that factor, and `WM_DPICHANGED` no longer changes it.
+  The window frame keeps the monitor's DPI.
 
 ## Not Yet Decided
 
