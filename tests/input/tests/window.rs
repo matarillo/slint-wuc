@@ -114,9 +114,14 @@ fn a_fixed_size_window_cant_be_resized_or_maximized() {
 }
 
 fn always_on_top_makes_the_window_topmost() {
-    let f = Fixture::new();
-    f.ui.set_on_top(true);
-    f.update();
+    // Windows doesn't always make a window of a background process topmost later, so the
+    // window starts topmost.
+    let ui = WindowTest::new().unwrap();
+    ui.set_on_top(true);
+    WindowInner::from_pub(ui.window()).update_window_properties();
+    let hwnd =
+        Win32WindowAdapter::from_window(ui.window()).unwrap().create_hwnd_for_testing().unwrap();
+    let f = Fixture { ui, hwnd };
     assert!(f.ex_style().contains(WS_EX_TOPMOST));
     f.ui.set_on_top(false);
     f.update();

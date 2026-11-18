@@ -112,7 +112,13 @@ The host applies the `Window` item's properties as upstream's winit backend does
   Logical sizes convert at that factor, and `WM_DPICHANGED` no longer changes it.
   The window frame keeps the monitor's DPI.
 
-## Not Yet Decided
+## System Tray
 
-- System tray: upstream's core has a `Shell_NotifyIconW` backend (`items/system_tray/windows.rs`), kept in the fork.
-- Drag and drop between applications (OLE).
+Upstream's core has a `Shell_NotifyIconW` backend (`items/system_tray/windows.rs`), which the fork keeps unchanged.
+Its message-only window gets its messages from the host's message loop.
+`probe-tray` runs upstream's `examples/system-tray`.
+
+## Drag and Drop
+
+As upstream's winit backend, the host doesn't start native drags: `start_drag` returns `false`, and the core drags inside the window.
+Drag and drop between applications through OLE comes after Phase 7.

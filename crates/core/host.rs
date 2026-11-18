@@ -1265,6 +1265,22 @@ impl WindowAdapterInternal for Win32WindowAdapter {
         Self::new_popup(self, kind).ok().map(|popup| popup as Rc<dyn WindowAdapter>)
     }
 
+    /// As upstream's winit backend: un-minimizes the window and activates it.
+    /// Windows flashes the taskbar button instead when another application has the foreground.
+    fn bring_to_front(&self) -> Result<(), PlatformError> {
+        if let Some(hwnd) = self.hwnd.get()
+            && self.popup.is_none()
+        {
+            unsafe {
+                if IsIconic(hwnd).as_bool() {
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                }
+                let _ = SetForegroundWindow(hwnd);
+            }
+        }
+        Ok(())
+    }
+
     fn get_parent(&self) -> Option<Rc<dyn WindowAdapter>> {
         let parent = self.popup.as_ref()?.parent.upgrade()?;
         Some(parent as Rc<dyn WindowAdapter>)
