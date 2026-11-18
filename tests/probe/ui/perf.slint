@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// A list that isn't virtualized: four items per row (the row's layout, two rectangles and a
+// text), so that the visual count follows `rows`.
+export component Perf inherits Window {
+    in property <int> rows: 0;
+    in property <int> highlighted: -1;
+    in property <string> suffix;
+    in property <bool> with-text: true;
+    in property <bool> same-text: false;
+    width: 400px;
+    height: 600px;
+
+    Flickable {
+        VerticalLayout {
+            for i in rows: HorizontalLayout {
+                height: 20px;
+                spacing: 4px;
+                Rectangle {
+                    width: 20px;
+                    border-radius: 4px;
+                    background: i == highlighted ? red : blue;
+                }
+
+                if with-text: Text {
+                    text: same-text ? "Row" : "Row \{i}\{suffix}";
+                }
+
+                Rectangle {
+                    border-width: 1px;
+                    border-color: gray;
+                    background: #eee;
+                }
+            }
+        }
+    }
+
+    popup := PopupWindow {
+        x: 50px;
+        y: 50px;
+        Rectangle {
+            width: 100px;
+            height: 100px;
+            background: yellow;
+        }
+    }
+
+    public function open-popup() {
+        popup.show();
+    }
+
+    public function close-popup() {
+        popup.close();
+    }
+}
+
+// A second top-level window, created and dropped in a loop.
+export component Extra inherits Window {
+    width: 200px;
+    height: 100px;
+    Text {
+        text: "Extra window";
+    }
+}

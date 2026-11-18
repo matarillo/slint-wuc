@@ -50,6 +50,10 @@ path = "src/popups.rs"
 name = "probe-tray"
 path = "src/tray.rs"
 
+[[bin]]
+name = "probe-perf"
+path = "src/perf.rs"
+
 [dependencies]
 # `mcp` starts the MCP server when `SLINT_MCP_PORT` is set, for `tools/ui-check`.
 slint = { path = "../../crates/slint", features = ["mcp"] }
@@ -58,6 +62,8 @@ i-slint-core = { path = "../../crates/core" }
 # For `probe-snapshot`: headless windows, test fonts, and PNG files.
 i-slint-backend-testing = { path = "../../crates/testing", features = ["internal"] }
 image = { workspace = true }
+# For `probe-perf`: process memory, handle and GDI/USER object counts, and process times.
+windows = { workspace = true, features = ["Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [build-dependencies]
 # The compiler is out of scope for this fork: the probe uses the published one, unmodified.

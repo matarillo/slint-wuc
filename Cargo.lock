@@ -2821,6 +2821,7 @@ dependencies = [
  "image",
  "slint",
  "slint-build",
+ "windows",
 ]
 
 [[package]]
