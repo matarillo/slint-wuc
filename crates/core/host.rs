@@ -543,6 +543,9 @@ impl Win32WindowAdapter {
         let this = Self::with_mode(&compositor, parent.detached, Some(popup))?;
         this.native_popup.set(parent.native_popup.get());
         this.renderer.fixed_test_font.set(parent.renderer.fixed_test_font.get());
+        // The core sizes the popup from its layout before it gives the window the popup's
+        // component, and text can be measured only through a window.
+        this.renderer.set_window_adapter(&(this.clone() as Rc<dyn WindowAdapter>));
         this.scale_factor_changed(parent.window.scale_factor());
         Ok(this)
     }
@@ -1715,6 +1718,18 @@ mod tests {
         let scale = dpi as f32 / 96.;
         assert_eq!(item_size(), (physical.width as f32 / scale, physical.height as f32 / scale));
         adapter.window().hide().unwrap();
+    }
+
+    #[test]
+    fn a_popup_measures_text_before_it_has_a_component() {
+        let ctx = crate::SlintContext::new(Box::new(Platform::new_headless().unwrap()));
+        let adapter = ctx.create_window_adapter().unwrap();
+        let host = Win32WindowAdapter::from_window(adapter.window()).unwrap();
+        let popup =
+            Win32WindowAdapter::new_popup(&host, crate::window::WindowKind::ToolTip).unwrap();
+        // The core sizes a tooltip from its text before the popup window has a component;
+        // without a window, the text measured 0x0.
+        assert!(popup.renderer.window_adapter().is_some());
     }
 
     #[test]

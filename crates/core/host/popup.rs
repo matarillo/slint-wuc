@@ -69,7 +69,11 @@ impl Popup {
         let parent = self.parent.upgrade()?;
         let parent_hwnd = parent.hwnd.get()?;
         let position = self.position.get()?.to_physical(parent.window.scale_factor());
-        let mut point = POINT { x: position.x, y: position.y };
+        // A popup of a popup, such as a submenu, is placed in its parent's content, which
+        // starts after the parent window's margin.
+        let parent_margin = parent.margin();
+        let mut point =
+            POINT { x: position.x + parent_margin.left, y: position.y + parent_margin.top };
         unsafe {
             let _ = ClientToScreen(parent_hwnd, &mut point);
             let monitor = MonitorFromWindow(parent_hwnd, MONITOR_DEFAULTTONEAREST);
@@ -232,7 +236,15 @@ pub(super) fn draw_popups(
     unsafe {
         let _ = ClientToScreen(hwnd, &mut origin);
     }
-    for popup in native_popups(adapter) {
+    // A popup's own popups, such as submenus, are the popup window's and come after it.
+    let mut popups = native_popups(adapter);
+    let mut i = 0;
+    while let Some(popup) = popups.get(i) {
+        let nested = native_popups(popup);
+        popups.splice(i + 1..i + 1, nested);
+        i += 1;
+    }
+    for popup in popups {
         let (Some(popup_hwnd), Some(p)) = (popup.hwnd.get(), &popup.popup) else { continue };
         let mut rect = RECT::default();
         if unsafe { GetWindowRect(popup_hwnd, &mut rect) }.is_err() {
