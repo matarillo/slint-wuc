@@ -195,7 +195,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 ### オーナーが Phase 7 の後に別途計画するもの
 - フォーク上での自作アプリ (slokk-slint) の確認。フェーズ中の確認対象にはしない (Phase 6 で決定)。
 - IMM32 から TSF への移行。IME の窓口は `crates/core/host/ime.rs` に閉じてあり、フォーカス移動時の扱いは TSF に合わせてある (`docs/design/input.md`)。再変換 (`IMR_RECONVERTSTRING`) も TSF 移行時に扱う。
-- Mica などの Windows 固有の機能。上流に API がないため、方式の確認だけ済ませてある (Phase 5)。
+- Mica などの Windows 固有の機能。上流に API がないため、方式の確認だけ済ませてある (Phase 5)。2026-11-19 に、MenuBar のない窓にはリダイレクション面を付けないようにし、背景が透明な窓で Mica が出ることを確かめた (`docs/recommendations-after-phase7.md` の「3. Mica」)。
 - OLE によるアプリ間のドラッグ&ドロップ (`start_drag`、`IDropTarget`)。上流の winit にもない (Phase 6 で決定)。
 
 ### 検証の持ち越し
@@ -205,6 +205,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 ### 未実装・判断待ち
 - 16384 px を超えるテキスト (仮想サーフェス)。今は切れる (Phase 4 から)。
 - キー入力を受けるポップアップ (コンボボックスの一覧など) が、フォーカスを UI Automation に伝えること (Phase 6)。
+- Mica と、全機能のメニューバーの併用。ネイティブのメニューバーは GDI のリダイレクション面に描かれ、その面が Mica を隠す。Slint 描画のメニューバー (`SLINT_NO_MUDA`) なら Mica は出るが、Alt/F10 の入口と、メニューバーの項目の UI Automation の役割がない。候補は、ホストがコンポジションでメニューバーを描き、ドロップダウンを `TrackPopupMenuEx` で出すこと (L)。切り替え方 (環境変数か、フォーク独自の API か) も未定 (2026-11-19)。
 - コミット前に描いて壊したテキストのアトラスのページ。対策の候補は、解放をコミットの完了まで遅らせること (Phase 7)。
 - 将来の最適化: Slint のアニメーションの Composition アニメーションへの委譲。走査が 1 ms を超えるようなら dirty キュー方式に切り替える。ブラシを色ごとに共有するか。
 - 言語バインディング (インタープリター、C++、Node、Python) の移植。順序と不足は `docs/design/bindings-gap.md`。除外中の 13 件はここに含まれる。
