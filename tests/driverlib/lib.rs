@@ -39,7 +39,28 @@ impl TestCase {
     }
 }
 
+/// The directory that `entry` stands for, if git checked a symbolic link to a directory out as
+/// a text file with the link's target, as it does without symlink support (on Windows, by
+/// default). Upstream's `tests/cases/7guis` is such a link, to `examples/7guis`.
+fn checked_out_symlink(entry: &Path) -> Option<PathBuf> {
+    let metadata = std::fs::metadata(entry).ok()?;
+    // A real symbolic link is followed by the walk.
+    if !metadata.is_file() || metadata.len() > 512 {
+        return None;
+    }
+    let target = std::fs::read_to_string(entry).ok()?;
+    let target = target.trim();
+    if target.is_empty() || target.contains(['\n', '\0']) {
+        return None;
+    }
+    let target = entry.parent()?.join(target);
+    target.is_dir().then_some(target)
+}
+
 /// Returns a list of all the `.slint` files in the `folders` below `case_root`, e.g. `tests/cases`.
+///
+/// An entry of `folders` may also name a file at the top of `case_root`, which is the only case
+/// of that entry.
 pub fn collect_test_cases(case_root: &Path, folders: &[&str]) -> std::io::Result<Vec<TestCase>> {
     let mut results = Vec::new();
 
@@ -47,8 +68,10 @@ pub fn collect_test_cases(case_root: &Path, folders: &[&str]) -> std::io::Result
     let filter = std::env::var("SLINT_TEST_FILTER").ok();
 
     for folder in folders {
-        let walker =
-            walkdir::WalkDir::new(case_root.join(folder)).follow_links(true).sort_by_file_name();
+        let entry_path = case_root.join(folder);
+        // The cases are named as below `case_root`, even where the walk goes elsewhere.
+        let walk_root = checked_out_symlink(&entry_path).unwrap_or_else(|| entry_path.clone());
+        let walker = walkdir::WalkDir::new(&walk_root).follow_links(true).sort_by_file_name();
         for entry in walker {
             let entry = entry?;
             if entry.file_type().is_dir() {
@@ -56,7 +79,13 @@ pub fn collect_test_cases(case_root: &Path, folders: &[&str]) -> std::io::Result
                 continue;
             }
             let absolute_path = entry.into_path();
-            let relative_path = PathBuf::from(absolute_path.strip_prefix(case_root).unwrap());
+            let within_entry = absolute_path.strip_prefix(&walk_root).unwrap();
+            // `join` of an empty path appends a separator: a file that is the entry itself.
+            let relative_path = if within_entry.as_os_str().is_empty() {
+                PathBuf::from(folder)
+            } else {
+                Path::new(folder).join(within_entry)
+            };
             // The filter uses `/` on every platform.
             if let Some(filter) = &filter
                 && !relative_path.to_str().unwrap().replace('\\', "/").contains(filter)

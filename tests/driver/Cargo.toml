@@ -26,7 +26,7 @@ i-slint-core = { path = "../../crates/core" }
 
 [build-dependencies]
 # The compiler is out of scope for this fork: the driver uses the published one, unmodified.
-i-slint-compiler = { version = "=1.19.0", features = ["default", "rust", "display-diagnostics"] }
+i-slint-compiler = { version = "=1.19.0", features = ["default", "rust", "display-diagnostics", "bundle-translations"] }
 
 rayon = "1"
 spin_on = "0.1"

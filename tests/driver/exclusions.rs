@@ -15,6 +15,10 @@ const TESTING_BACKEND_OPEN_URL: &str = concat!(
     "TestingBackend (upstream's testing platform, for a SlintContext of its own, ",
     "that records open_url), phase 7"
 );
+const TESTING_BACKEND_DEBUG_LOGS: &str = concat!(
+    "TestingBackend (upstream's testing platform, for a SlintContext of its own, ",
+    "that collects debug_logs), phase 7"
+);
 
 /// Cases that are generated and compiled, but ignored when running.
 pub const IGNORED: &[(&str, &str)] = &[];
@@ -33,4 +37,5 @@ pub const NOT_BUILT: &[(&str, &str)] = &[
     ("elements/timer_own_context.slint", TESTING_BACKEND),
     ("elements/window_shared_adapter_context.slint", TESTING_BACKEND),
     ("text/componentcontainer_font_size_propagation.slint", INTERPRETER),
+    ("expr/debug_context.slint", TESTING_BACKEND_DEBUG_LOGS),
 ];

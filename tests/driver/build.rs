@@ -11,18 +11,53 @@ use std::path::{Path, PathBuf};
 mod exclusions;
 
 /// The folders of the upstream cases that this driver runs, one test binary each.
+///
+/// This is every folder of `tests/cases`. Upstream's `widgets` folder runs once per style in
+/// `widgets-<style>` binaries; the fork has the fluent style only, so the cases run once.
 const CASE_FOLDERS: &[&str] = &[
-    "properties",
-    "layout",
-    "models",
-    "conditional",
-    "input",
-    "focus",
-    "elements",
-    "text",
-    "popups",
+    "7guis",
     "accessibility",
+    "bindings",
+    "callbacks",
+    "children",
+    "component_slots",
+    "conditional",
+    "crashes",
+    "elements",
+    "examples",
+    "exports",
+    "expr",
+    "flexbox",
+    "focus",
+    "globals",
+    "imports",
+    "input",
+    "interfaces",
+    "issues",
+    "layout",
+    "legacy",
+    "lookup",
+    "match_element",
+    "models",
+    "popups",
+    "properties",
+    "subcomponents",
+    "testing",
+    "text",
+    "translations",
+    "types",
     "widgets",
+];
+
+/// The cases at the top of `tests/cases`. Upstream collects them in the library test of its
+/// main.rs, so they have no test binary of their own.
+const CASE_FILES: &[&str] = &[
+    "absolute_coords.slint",
+    "absolute_coords2.slint",
+    "absolute_coords_with_transform.slint",
+    "platform.slint",
+    "simple.slint",
+    "test_infrastructure.slint",
 ];
 
 /// The upstream cases are read in place, not copied.
@@ -81,7 +116,12 @@ fn make_generator_files() -> std::io::Result<HashMap<OsString, BufWriter<File>>>
 fn generated_file_for_test<'a>(
     testcase: &test_driver_lib::TestCase,
     generated_files: &'a mut HashMap<OsString, BufWriter<File>>,
+    fallback: &'a mut BufWriter<File>,
 ) -> &'a mut BufWriter<File> {
+    // A case at the top of the case root has no folder: it goes to main.rs.
+    if testcase.relative_path.components().count() == 1 {
+        return fallback;
+    }
     // For each folder in cases/ generate a separate file.
     // This allows splitting the test cases into multiple test binaries, which allows
     // parallelizing the compilation.
@@ -116,7 +156,9 @@ fn main() -> std::io::Result<()> {
 
     let mut generated_files = make_generator_files()?;
 
-    let testcases = test_driver_lib::collect_test_cases(&case_root(), CASE_FOLDERS)?;
+    // A file as the root of the walk is the only entry of the walk.
+    let folders_and_files: Vec<&str> = CASE_FOLDERS.iter().chain(CASE_FILES).copied().collect();
+    let testcases = test_driver_lib::collect_test_cases(&case_root(), &folders_and_files)?;
 
     // A path that matches no case is a typo, or a case that upstream removed.
     // With a filter, the cases that the exclusion list names may be filtered out.
@@ -131,19 +173,37 @@ fn main() -> std::io::Result<()> {
 
     // Generate the per-case modules on all cores: each case runs the Slint compiler
     // (twice with SLINT_TEST_DETERMINISTIC_OUTPUT), which dominates the build script's runtime.
-    let module_lines = rayon::ThreadPoolBuilder::new()
+    let results = rayon::ThreadPoolBuilder::new()
         // Kept low (< 1MB default stack on Windows) so that tests catch stack overflow earlier
         .stack_size(750 * 1024)
         .build()
         .expect("failed to create thread pool")
-        .install(|| {
-            testcases.par_iter().map(process_case).collect::<std::io::Result<Vec<String>>>()
-        })?;
+        .install(|| testcases.par_iter().map(process_case).collect::<Vec<_>>());
+
+    // Report every case that the Slint compiler rejects, not only the first, so that the
+    // exclusions can be listed in one run.
+    let mut failed = 0;
+    let mut module_lines = Vec::new();
+    for (testcase, result) in testcases.iter().zip(results) {
+        match result {
+            Ok(module_line) => module_lines.push(module_line),
+            Err(error) => {
+                println!("cargo:warning=cannot generate {}: {error}", case_key(testcase));
+                failed += 1;
+            }
+        }
+    }
+    if failed > 0 {
+        return Err(std::io::Error::other(format!(
+            "{failed} cases cannot be generated, see the warnings; list them in NOT_BUILT of exclusions.rs"
+        )));
+    }
 
     // Write the module declarations serially, in collection order, so the
     // including files don't depend on thread scheduling.
     for (testcase, module_line) in testcases.iter().zip(module_lines) {
-        writeln!(generated_file_for_test(testcase, &mut generated_files), "{module_line}")?;
+        let output = generated_file_for_test(testcase, &mut generated_files, &mut generated_file);
+        writeln!(output, "{module_line}")?;
     }
 
     generated_file.flush()?;
@@ -288,6 +348,12 @@ fn compile_and_generate(
     compiler_config.library_paths = library_paths;
     compiler_config.style = Some("fluent".to_string());
     compiler_config.debug_info = true;
+    if source.contains("//bundle-translations") {
+        compiler_config.bundled_translations_path =
+            Some(testcase.absolute_path.parent().unwrap().to_path_buf());
+        compiler_config.translation_domain =
+            Some(testcase.absolute_path.file_stem().unwrap().to_str().unwrap().to_string());
+    }
     if source.contains("//no-default-translation-context") {
         compiler_config.default_translation_context =
             i_slint_compiler::DefaultTranslationContext::None;
@@ -296,8 +362,18 @@ fn compile_and_generate(
         spin_on::spin_on(compile_syntax_node(syntax_node, diag, compiler_config));
 
     if diag.has_errors() {
-        diag.print_warnings_and_exit_on_error();
-        return Err(std::io::Error::other(format!("build error in {:?}", testcase.absolute_path)));
+        // Not `print_warnings_and_exit_on_error`: the other cases should report theirs too.
+        let errors = diag
+            .iter()
+            .filter(|d| d.level() == diagnostics::DiagnosticLevel::Error)
+            .map(|d| {
+                let (line, column) = d.line_column();
+                let file = d.source_file().and_then(|p| p.file_name()).unwrap_or_default();
+                format!("{}:{line}:{column}: {}", file.to_string_lossy(), d.message())
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        return Err(std::io::Error::other(errors));
     } else {
         diag.print();
     }
