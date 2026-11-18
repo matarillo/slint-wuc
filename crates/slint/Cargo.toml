@@ -26,11 +26,14 @@ system-tray = ["i-slint-core/system-tray"]
 log = ["i-slint-core/log"]
 serde = ["i-slint-core/serde"]
 gettext = ["i-slint-core/gettext-rs"]
+# Starts the MCP server when the `SLINT_MCP_PORT` environment variable is set.
+mcp = ["dep:i-slint-backend-testing", "i-slint-backend-testing/mcp"]
 
 [dependencies]
 # Generated code decodes the images it embeds at run time, as upstream's default backends do.
 i-slint-core = { path = "../core", features = ["image-decoders", "image-default-formats", "svg"] }
 i-slint-common = { workspace = true }
+i-slint-backend-testing = { path = "../testing", optional = true }
 const-field-offset = { version = "0.2.1" }
 euclid = { workspace = true }
 once_cell = { version = "1.5", default-features = false, features = ["std"] }

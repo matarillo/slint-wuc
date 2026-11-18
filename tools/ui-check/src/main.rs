@@ -8,7 +8,9 @@
 //! ```
 //!
 //! Build the galleries first, with `SLINT_STYLE=fluent`: `tools/upstream-gallery` (its own
-//! workspace) and `probe-gallery`. Upstream's runs headless; the fork's shows its windows.
+//! workspace) and `probe-gallery`. Both show their windows for a few seconds: upstream's on
+//! winit with its software renderer, which draws popups inside the window as the fork's
+//! snapshots do.
 //! The images go to `manual-checks/ui-check/<scenario>/`, with `report.tsv` listing how much each
 //! step differs.
 
@@ -39,12 +41,17 @@ impl Side {
         let (exe, backend) = match self {
             Side::Upstream => (
                 root.join("tools/upstream-gallery/target/debug/upstream-gallery.exe"),
-                Some("headless-software"),
+                Some("winit-software"),
             ),
             Side::Fork => (root.join("target/debug/probe-gallery.exe"), None),
         };
         let mut command = Command::new(&exe);
-        command.env("SLINT_MCP_PORT", port.to_string());
+        // The same scale factor on both sides, whatever the monitor's, and menus that Slint
+        // draws, which screenshots show, instead of native ones.
+        command
+            .env("SLINT_MCP_PORT", port.to_string())
+            .env("SLINT_SCALE_FACTOR", "1")
+            .env("SLINT_NO_MUDA", "1");
         if let Some(backend) = backend {
             command.env("SLINT_BACKEND", backend);
         }

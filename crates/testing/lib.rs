@@ -17,6 +17,10 @@ pub mod testing_platform;
 pub use testing_platform::{TestingPlatform, get_mocked_time};
 #[cfg(feature = "internal")]
 pub use testing_platform::{TestingWindow, access_testing_window, mock_elapsed_time};
+#[cfg(feature = "mcp")]
+pub(crate) mod introspection;
+#[cfg(feature = "mcp")]
+pub mod mcp_server;
 
 /// Initialize the testing platform without support for event loop.
 /// This means that each test thread can use its own platform, but global functions that needs

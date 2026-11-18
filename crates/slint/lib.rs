@@ -42,10 +42,33 @@ pub mod private_unstable_api;
 fn with_context<R>(
     f: impl FnOnce(&i_slint_core::SlintContext) -> R,
 ) -> Result<R, PlatformError> {
-    i_slint_core::with_global_context(
-        || Ok(alloc::boxed::Box::new(i_slint_core::host::Platform::new()?)),
+    let mut platform_created = false;
+    let result = i_slint_core::with_global_context(
+        || {
+            let platform = alloc::boxed::Box::new(i_slint_core::host::Platform::new()?);
+            platform_created = true;
+            Ok(platform)
+        },
         f,
-    )
+    );
+
+    #[cfg(feature = "mcp")]
+    if result.is_ok() && platform_created {
+        init_testing_backends();
+    }
+    #[cfg(not(feature = "mcp"))]
+    let _ = platform_created;
+
+    result
+}
+
+/// Starts the MCP server if the `mcp` feature is enabled, as upstream's backend selector does
+/// once it has created the platform. The server listens when `SLINT_MCP_PORT` is set.
+#[cfg(feature = "mcp")]
+fn init_testing_backends() {
+    if let Err(e) = i_slint_backend_testing::mcp_server::init() {
+        i_slint_core::debug_log!("MCP server init failed: {e:?}");
+    }
 }
 
 /// Enters the main event loop, which shows the windows and reacts to user input.

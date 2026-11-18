@@ -13,14 +13,63 @@ rust-version.workspace = true
 version.workspace = true
 publish = false
 
+build = "build.rs"
+
 [lib]
 path = "lib.rs"
 
 [features]
 # Internal feature that is only enabled for Slint's own tests
 internal = []
+# The MCP server that lets an MCP client inspect and drive the running application, started
+# when the `SLINT_MCP_PORT` environment variable is set. Upstream's feature, without
+# `renderer-software`: this runtime takes snapshots of its windows with its own host.
+mcp = [
+  "prost",
+  "pbjson",
+  "serde",
+  "serde_json",
+  "slotmap",
+  "async-net",
+  "futures-lite",
+  "image",
+  "base64",
+  "httparse",
+  "prost-build",
+  "prost-types",
+  "pbjson-build",
+  "protox",
+]
 
 [dependencies]
 i-slint-core = { path = "../core" }
 i-slint-common = { workspace = true, features = ["shared-fontique"] }
 vtable = { workspace = true }
+prost = { version = "0.14", optional = true }
+pbjson = { version = "0.9", optional = true }
+serde = { version = "1", optional = true }
+serde_json = { workspace = true, optional = true }
+base64 = { version = "0.23", optional = true }
+httparse = { version = "1", optional = true }
+slotmap = { version = "1.1", optional = true }
+async-net = { version = "2.0.0", optional = true }
+futures-lite = { version = "2.3.0", optional = true }
+image = { workspace = true, optional = true, features = ["png"] }
+
+[build-dependencies]
+prost = { version = "0.14", optional = true }
+prost-build = { version = "0.14", optional = true }
+prost-types = { version = "0.14", optional = true }
+pbjson-build = { version = "0.9", optional = true }
+protox = { version = "0.10", optional = true }
+
+[dev-dependencies]
+# The unit tests of the MCP server declare their components with `slint!`, which the fork's
+# `slint` doesn't have: use upstream's macro crate, as `tests/probe` uses upstream's `slint-build`.
+slint = { path = "../slint", default-features = false, features = ["std", "compat-1-2"] }
+slint-macros = "=1.19.0"
+
+# `introspection` is upstream's file, and keeps the code for upstream's `system-testing`
+# feature, which this crate doesn't have.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("system-testing"))'] }

@@ -47,7 +47,8 @@ name = "probe-popups"
 path = "src/popups.rs"
 
 [dependencies]
-slint = { path = "../../crates/slint" }
+# `mcp` starts the MCP server when `SLINT_MCP_PORT` is set, for `tools/ui-check`.
+slint = { path = "../../crates/slint", features = ["mcp"] }
 # For the visual tree dump of `--check`.
 i-slint-core = { path = "../../crates/core" }
 # For `probe-snapshot`: headless windows, test fonts, and PNG files.
