@@ -42,6 +42,13 @@ pub fn mock_elapsed_time(duration: std::time::Duration) {
     testing_platform::mock_elapsed_time(duration.as_millis() as _);
 }
 
+/// Set the system accent color, as a platform backend would when the OS theme changes.
+/// Must be called after initializing the testing platform (e.g. after [`init_no_event_loop()`]).
+pub fn set_system_accent_color(color: i_slint_core::Color) {
+    i_slint_core::context::with_existing_context(|ctx| ctx.set_accent_color(color))
+        .expect("the testing platform must be initialized first");
+}
+
 /// Set the operating system's reduced-motion setting, as a platform backend would when it
 /// changes. While [`MotionPreference::Reduced`], animations that start go straight to their target.
 /// Must be called after initializing the testing platform (e.g. after [`init_no_event_loop()`]).
