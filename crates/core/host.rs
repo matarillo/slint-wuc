@@ -1347,6 +1347,62 @@ impl WindowAdapterInternal for Win32WindowAdapter {
             accesskit.unregister_item_tree(component);
         }
     }
+
+    #[cfg(feature = "raw-window-handle-06")]
+    fn window_handle_06_rc(
+        &self,
+    ) -> Result<Arc<dyn raw_window_handle_06::HasWindowHandle>, raw_window_handle_06::HandleError>
+    {
+        let adapter =
+            self.self_weak.upgrade().ok_or(raw_window_handle_06::HandleError::Unavailable)?;
+        #[allow(clippy::arc_with_non_send_sync)] // The core asks for an `Arc`, as winit's is.
+        Ok(Arc::new(RawHandles(adapter)))
+    }
+
+    #[cfg(feature = "raw-window-handle-06")]
+    fn display_handle_06_rc(
+        &self,
+    ) -> Result<Arc<dyn raw_window_handle_06::HasDisplayHandle>, raw_window_handle_06::HandleError>
+    {
+        let adapter =
+            self.self_weak.upgrade().ok_or(raw_window_handle_06::HandleError::Unavailable)?;
+        #[allow(clippy::arc_with_non_send_sync)]
+        Ok(Arc::new(RawHandles(adapter)))
+    }
+}
+
+/// What [`Window::window_handle`](crate::api::Window::window_handle) returns.
+///
+/// It asks the window each time, so a handle taken before `show()` creates the HWND gives it
+/// afterwards. It keeps the window alive, as upstream's keeps the winit window, so that the
+/// HWND stays valid while someone holds it.
+#[cfg(feature = "raw-window-handle-06")]
+struct RawHandles(Rc<Win32WindowAdapter>);
+
+#[cfg(feature = "raw-window-handle-06")]
+impl raw_window_handle_06::HasWindowHandle for RawHandles {
+    fn window_handle(
+        &self,
+    ) -> Result<raw_window_handle_06::WindowHandle<'_>, raw_window_handle_06::HandleError> {
+        use core::num::NonZeroIsize;
+        let hwnd = self.0.hwnd.get().ok_or(raw_window_handle_06::HandleError::Unavailable)?;
+        let mut handle = raw_window_handle_06::Win32WindowHandle::new(
+            NonZeroIsize::new(hwnd.0 as isize)
+                .ok_or(raw_window_handle_06::HandleError::Unavailable)?,
+        );
+        handle.hinstance = NonZeroIsize::new(unsafe { GetWindowLongPtrW(hwnd, GWLP_HINSTANCE) });
+        // SAFETY: the adapter destroys the HWND only when it is dropped, and `self` keeps it.
+        Ok(unsafe { raw_window_handle_06::WindowHandle::borrow_raw(handle.into()) })
+    }
+}
+
+#[cfg(feature = "raw-window-handle-06")]
+impl raw_window_handle_06::HasDisplayHandle for RawHandles {
+    fn display_handle(
+        &self,
+    ) -> Result<raw_window_handle_06::DisplayHandle<'_>, raw_window_handle_06::HandleError> {
+        Ok(raw_window_handle_06::DisplayHandle::windows())
+    }
 }
 
 impl Drop for Win32WindowAdapter {
@@ -1843,6 +1899,35 @@ mod tests {
         // Nothing changed, nothing pending.
         host.sync_now();
         assert!(!host.sync_pending.get());
+    }
+
+    /// `Window::window_handle()` gives the HWND once the window has one, as upstream's winit does
+    /// once `show()` has created it.
+    #[cfg(feature = "raw-window-handle-06")]
+    #[test]
+    fn the_window_handle_is_the_hwnd() {
+        use raw_window_handle_06::{
+            HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
+        };
+        let ctx = crate::SlintContext::new(Box::new(Platform::new().unwrap()));
+        let adapter = ctx.create_window_adapter().unwrap();
+        let tree = RectTree::new((100., 50.), 0);
+        WindowInner::from_pub(adapter.window()).set_component(&vtable::VRc::into_dyn(tree.clone()));
+        let handle = adapter.window().window_handle();
+        assert!(matches!(handle.window_handle(), Err(HandleError::Unavailable)));
+
+        let host = Win32WindowAdapter::from_window(adapter.window()).unwrap();
+        let hwnd = host.create_hwnd_for_testing().unwrap();
+        let RawWindowHandle::Win32(win32) = handle.window_handle().unwrap().as_raw() else {
+            panic!("not a Win32 handle");
+        };
+        assert_eq!(win32.hwnd.get(), hwnd.0 as isize);
+        let instance = unsafe { GetModuleHandleW(None) }.unwrap();
+        assert_eq!(win32.hinstance.map(|h| h.get()), Some(instance.0 as isize));
+        assert!(matches!(handle.display_handle().unwrap().as_raw(), RawDisplayHandle::Windows(_)));
+        // A handle taken now gives the same HWND.
+        let again = adapter.window().window_handle();
+        assert_eq!(again.window_handle().unwrap().as_raw(), RawWindowHandle::Win32(win32));
     }
 
     #[test]

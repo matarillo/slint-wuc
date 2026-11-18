@@ -5,7 +5,7 @@
 材料は、`docs/plan.md` の「Phase 7 の後に持ち越したこと」と、文脈を持たない Opus のサブエージェントによる読み取り専用のレビュー (同日) です。
 レビューの主張のうち、推奨の上位を支える次の 4 点はコードで確かめました。
 
-- ホストが HWND を外に出さないこと
+- ホストが HWND を外に出さないこと (2026-11-19 に `Window::window_handle()` で出すようにした)
 - README がないこと
 - `slint!` マクロがないこと
 - カーソル画像が未対応なこと
@@ -21,7 +21,7 @@
 
 ## 推奨する順序
 
-1. `Window::window_handle()` を使えるようにする (リスト外、S)
+1. `Window::window_handle()` を使えるようにする (リスト外、S)。2026-11-19 に済み
 2. 使い始めの入口を作る (リスト外、S の作業が複数)
 3. Mica を、1 を使うサンプルで見せる (S〜M)
 4. 上流の `examples/custom-titlebar` とライブリサイズの見た目を確かめる (リスト外、S)。2026-11-19 に済み (透けない角を直した)
@@ -37,16 +37,24 @@ Mica、ダークモードへの追従、アクセント色、ネイティブメ�
 
 ### 1. `Window::window_handle()` (raw-window-handle 0.6)
 
-- 現状【確認】:
-  - core の `window_handle_06` は既定で `NotSupported` を返し、`Win32WindowAdapter` は実装していません。
-  - facade (`crates/slint/Cargo.toml`) には、上流にある `raw-window-handle-06` の feature がありません。core 側の feature はあります。
+2026-11-19 に済みました。
+
+- 元の状態:
+  - core の `window_handle_06` は既定で `NotSupported` を返し、`Win32WindowAdapter` は実装していませんでした。
+  - facade (`crates/slint/Cargo.toml`) には、上流にある `raw-window-handle-06` の feature がありませんでした。core 側の feature はありました。
 - 効果: 上流と同じ API なので、フォーク独自の API は要りません。次のことがアプリ側ですぐにできるようになります。
   - 親ウィンドウを指定したファイルダイアログ (rfd など)
   - `DwmSetWindowAttribute` による Mica、角、枠の色の設定
   - 他のライブラリとの連携
-- 作業: host.rs で `window_handle_06_rc` と `display_handle_06_rc` を実装し、`Win32WindowHandle` に HWND と hinstance を入れます。あわせて facade に feature を足します。
-- 制約: HWND は `show()` で作られるので、それより前は取れません。上流の winit も同じです。
-- 検証: 取れた HWND が一致するかを見るユニットテストを 1 本足します。
+- したこと:
+  - host.rs で `window_handle_06_rc` と `display_handle_06_rc` を実装しました。`Win32WindowHandle` には HWND と hinstance (`GWLP_HINSTANCE`) を、表示側には `WindowsDisplayHandle` を入れます。
+  - facade に、上流と同じ名前の feature `raw-window-handle-06` を足しました。
+  - 返すハンドルは、取り出すたびに窓に HWND を尋ねます。`show()` の前に取ったハンドルでも、`show()` の後には HWND が取れます。
+  - ハンドルは窓を強参照で持ちます。上流の winit が winit の窓を `Arc` で持つのと同じで、持っている間は HWND が壊れません。
+- 制約: HWND は `show()` で作られるので、それより前は `HandleError::Unavailable` になります。上流の winit も、窓ができる前は同じエラーです。アプリは `show()` の後に取ります (`run()` の前に `show()` を呼ぶ)。
+- 検証:
+  - ユニットテスト `host::tests::the_window_handle_is_the_hwnd` で、HWND を作る前は `Unavailable`、作った後は HWND と hinstance が一致することを確かめます。HWND は表示しないので、デスクトップに窓は出ません。
+  - `probe-mica` は、`create_hwnd_for_testing` の代わりに `window_handle()` で HWND を取るようにしました。上流のアプリと同じ書き方で、core の内部には触れません。`tools/backdrop-capture.ps1` で、変更の前後の色が同じであることを確かめました (MenuBar なしで Mica あり: 中央 `#F3F3F3`、Mica なし: 中央 `#FF00FF`、ネイティブの MenuBar: 中央 `#FFFFFF`)。
 
 ### 2. 使い始めの入口
 
@@ -82,7 +90,7 @@ Mica、ダークモードへの追従、アクセント色、ネイティブメ�
   - MenuBar と Mica を同じ窓で使いたいアプリは、短期的には Slint 描画のメニューバーを選びます。その代わり、Alt/F10 の入口とメニューバーの項目の役割 (UI Automation) が欠けます。この 2 つは、上流が生成するウィジェットのコードの中にあるので、フォークでは直せません。
   - 「Mica と、全機能のメニューバーの併用」は積み残しです (`docs/plan.md`)。方式の候補は、ホストがコンポジションでメニューバーを描き、ドロップダウンを `TrackPopupMenuEx` で出すことです (L)。
   - Slint 描画への切り替え方は、まだ決めていません。今は環境変数 `SLINT_NO_MUDA` です。上流にも同じ名前があるので、上流でも同じ挙動になります。ただし、プロセス全体に効き、ネイティブのコンテキストメニューも止まります。窓ごとに選ばせるなら、フォーク独自の API になります (判断事項 1)。Mica を見せるサンプルを作るときに決めます。
-- 進め方: まず 1 の HWND を使うサンプルで見せます。フォーク独自の API (facade だけの拡張など) を足すかは、そのあとに決めます。
+- 進め方: まず 1 の HWND を使うサンプルで見せます。`probe-mica` は 2026-11-19 から `window_handle()` で HWND を取っており、その形になっています。フォーク独自の API (facade だけの拡張など) を足すかは、そのあとに決めます。
 - 検証: プローブを、画面の右端に置いた単色の下地の窓の上に重ね、その矩形だけをキャプチャして色を見ます (`tools/backdrop-capture.ps1`)。Mica は、アクティブな窓では壁紙の色味が乗ります。
 
 ### 4. タイトルバーのない窓とライブリサイズ

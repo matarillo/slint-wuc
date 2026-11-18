@@ -5,16 +5,21 @@
 
 slint::include_modules!();
 
-use i_slint_core::host::Win32WindowAdapter;
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::ComponentHandle;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
     DWM_SYSTEMBACKDROP_TYPE, DWMSBT_MAINWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DwmSetWindowAttribute,
 };
 
-/// Sets the backdrop as an application would, through the window's HWND.
+/// Sets the backdrop as an application would with upstream Slint: through the HWND that
+/// `Window::window_handle()` gives once `show()` has created the window.
 fn set_mica(window: &slint::Window) {
-    let host = Win32WindowAdapter::from_window(window).unwrap();
-    let hwnd = host.create_hwnd_for_testing().unwrap();
+    let handle = window.window_handle();
+    let RawWindowHandle::Win32(win32) = handle.window_handle().unwrap().as_raw() else {
+        panic!("not a Win32 window");
+    };
+    let hwnd = HWND(win32.hwnd.get() as _);
     let result = unsafe {
         DwmSetWindowAttribute(
             hwnd,
@@ -31,12 +36,14 @@ fn main() {
     let mica = !args.iter().any(|a| a == "--no-mica");
     if args.iter().any(|a| a == "--menu") {
         let app = MicaMenu::new().unwrap();
+        app.show().unwrap();
         if mica {
             set_mica(app.window());
         }
         app.run().unwrap();
     } else {
         let app = MicaPlain::new().unwrap();
+        app.show().unwrap();
         if mica {
             set_mica(app.window());
         }

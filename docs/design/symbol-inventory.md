@@ -831,7 +831,7 @@ Non-test paths: `(module itself)` (1).
 | `PlatformError` | kept; the variant `SetPlatformError(platform::SetPlatformError)` ties it to the `platform` module (`api.rs:1377,1411`) |
 | `set_xdg_app_id` | not meaningful on Windows |
 | `GraphicsAPI`, `RenderingState`, `RenderingNotifier`, `SetRenderingNotifierError` | incompatible: renderer hooks, with wgpu variants (`api.rs:266-374`) |
-| `WindowHandle` (feature `raw-window-handle-06`) | incompatible in its upstream form |
+| `WindowHandle` (feature `raw-window-handle-06`) | incompatible in its upstream form; kept since 2026-11-19, when the host started to give the HWND (`docs/recommendations-after-phase7.md`) |
 | `Brush`, `Color`, `Gray8Pixel`, `Image`, `LoadImageError`, `OklchColor`, `Rgb8Pixel`, `Rgb565Pixel`, `Rgba8Pixel`, `RgbaColor`, `SharedPixelBuffer` (`api.rs:19-22`) | kept |
 | `DataTransfer`, `Keys`, `SharedVector`, `SharedString`, `ToSharedString`, `format!` (`api.rs:16,23-25`) | kept |
 | `future::*`, that is `JoinHandle` (`api.rs:18`) | kept; it needs `EventLoopProxy` (`future.rs:36`) |
@@ -840,7 +840,7 @@ Non-test paths: `(module itself)` (1).
 - `Window::set_size` stays and only calls `WindowAdapter::set_size`; the `renderer().resize(..)` call is in the `WindowEvent::Resized` arm of `dispatch_event_with_result` (`api.rs:754`).
 - `Window::set_rendering_notifier` (`api.rs:521-525`) and `Window::take_snapshot` (`api.rs:850-851`) call `renderer()` and are incompatible.
 - `Window::dispatch_event`, `try_dispatch_event` and `dispatch_event_with_result` (`api.rs:631-786`) take `platform::WindowEvent` and return `platform::WindowEventDispatchResult`; they are the input path for the host and cannot keep the `platform` module path.
-- `Window::window_handle` (`api.rs:825`) needs `raw-window-handle-06`.
+- `Window::window_handle` (`api.rs:825`) needs `raw-window-handle-06`. Since 2026-11-19 the facade has the feature and the host gives the HWND.
 - `Window::set_virtual_keyboard` and `virtual_keyboard` (`api.rs:604,614`) stay in shape.
 
 ### 5.3 `slint::platform`

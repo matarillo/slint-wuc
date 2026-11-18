@@ -64,7 +64,9 @@ path = "src/perf.rs"
 
 [dependencies]
 # `mcp` starts the MCP server when `SLINT_MCP_PORT` is set, for `tools/ui-check`.
-slint = { path = "../../crates/slint", features = ["mcp"] }
+# `raw-window-handle-06`: for `probe-mica`, the HWND, as an application gets it from upstream.
+slint = { path = "../../crates/slint", features = ["mcp", "raw-window-handle-06"] }
+raw-window-handle = "0.6"
 # For the visual tree dump of `--check`.
 i-slint-core = { path = "../../crates/core" }
 # For `probe-snapshot`: headless windows, test fonts, and PNG files.

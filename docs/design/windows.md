@@ -106,6 +106,14 @@ The host applies the `Window` item's properties as upstream's winit backend does
 - A frame change keeps the client size, so the `WM_SIZE` it sends doesn't count as the user's.
 - `Dialog` needs nothing more: the core orders its buttons for Windows.
 
+## Window Handle
+
+- With the facade's `raw-window-handle-06` feature, as upstream, `Window::window_handle()` gives the HWND and the module's `hinstance` (`Win32WindowHandle`) and a `WindowsDisplayHandle`.
+- The HWND exists once `show()` has created it; before that, the handle reports `HandleError::Unavailable`, as winit's does before its window exists.
+- The handle asks the window each time, so one taken before `show()` works after it.
+- It keeps the window alive, as upstream's keeps the winit window, so the HWND stays valid while someone holds it.
+- Applications set what upstream has no API for through it, such as the Mica backdrop (`tests/probe/src/mica.rs`).
+
 ## System Settings
 
 - Color scheme and accent color, as upstream's winit backend reports them on Windows.

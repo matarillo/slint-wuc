@@ -26,6 +26,9 @@ system-tray = ["i-slint-core/system-tray"]
 log = ["i-slint-core/log"]
 serde = ["i-slint-core/serde"]
 gettext = ["i-slint-core/gettext-rs"]
+# As upstream: `Window::window_handle()`, whose result implements raw-window-handle 0.6's
+# `HasWindowHandle` (the HWND) and `HasDisplayHandle`.
+raw-window-handle-06 = ["dep:raw-window-handle-06", "i-slint-core/raw-window-handle-06"]
 # Starts the MCP server when the `SLINT_MCP_PORT` environment variable is set.
 mcp = ["dep:i-slint-backend-testing", "i-slint-backend-testing/mcp"]
 
@@ -39,3 +42,4 @@ euclid = { workspace = true }
 once_cell = { version = "1.5", default-features = false, features = ["std"] }
 pin-weak = { version = "1.1", default-features = false }
 vtable = { workspace = true }
+raw-window-handle-06 = { workspace = true, optional = true }

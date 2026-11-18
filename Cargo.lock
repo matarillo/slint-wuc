@@ -2755,6 +2755,7 @@ dependencies = [
  "i-slint-core",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "vtable",
 ]
 
@@ -2819,6 +2820,7 @@ dependencies = [
  "i-slint-backend-testing",
  "i-slint-core",
  "image",
+ "raw-window-handle",
  "slint",
  "slint-build",
  "windows",
