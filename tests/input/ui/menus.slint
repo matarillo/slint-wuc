@@ -1,0 +1,68 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// A menu bar whose entries follow properties, and a context menu over the whole window.
+// `activated` lists the entries that were activated.
+export component MenuTest inherits Window {
+    width: 200px;
+    height: 100px;
+    in-out property <string> activated;
+    in-out property <bool> show-edit;
+    in-out property <bool> checked: true;
+
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem {
+                title: "Open";
+                shortcut: @keys(Control + O);
+                activated => {
+                    root.activated += "open ";
+                }
+            }
+
+            MenuSeparator { }
+
+            MenuItem {
+                title: "Check";
+                checkable: true;
+                checked: root.checked;
+                activated => {
+                    root.activated += "check ";
+                }
+            }
+
+            MenuItem {
+                title: "Disabled";
+                enabled: false;
+            }
+
+            Menu {
+                title: "Recent";
+                MenuItem {
+                    title: "One";
+                    activated => {
+                        root.activated += "one ";
+                    }
+                }
+            }
+        }
+
+        if root.show-edit: Menu {
+            title: "Edit";
+            MenuItem {
+                title: "Copy";
+            }
+        }
+    }
+
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Cut";
+                activated => {
+                    root.activated += "cut ";
+                }
+            }
+        }
+    }
+}

@@ -52,6 +52,7 @@ use windows::core::{HSTRING, Interface, w};
 mod ime;
 mod input;
 mod keyboard;
+mod menu;
 #[doc(hidden)]
 pub mod pointer;
 mod popup;
@@ -523,6 +524,8 @@ pub struct Win32WindowAdapter {
     popup: Option<popup::Popup>,
     /// Whether the title bar is dark, once the host has set it.
     dark_title_bar: Cell<Option<bool>>,
+    menu_bar: menu::MenuBar,
+    context_menu: RefCell<Option<menu::PendingContextMenu>>,
 }
 
 impl Win32WindowAdapter {
@@ -585,6 +588,8 @@ impl Win32WindowAdapter {
             ime: Default::default(),
             popup,
             dark_title_bar: Cell::new(None),
+            menu_bar: menu::MenuBar::new(weak.clone()),
+            context_menu: Default::default(),
         }))
     }
 
@@ -679,9 +684,16 @@ impl Win32WindowAdapter {
                 Some(_) => (popup::Popup::STYLE, popup::Popup::EX_STYLE),
                 None => (WS_OVERLAPPEDWINDOW, WS_EX_NOREDIRECTIONBITMAP),
             };
+            let menu = if self.popup.is_none() { self.menu_bar.build() } else { None };
             let mut rc =
                 RECT { left: 0, top: 0, right: size.width as i32, bottom: size.height as i32 };
-            let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, GetDpiForSystem());
+            let _ = AdjustWindowRectExForDpi(
+                &mut rc,
+                style,
+                menu.is_some(),
+                ex_style,
+                GetDpiForSystem(),
+            );
             let frame = (
                 rc.right - rc.left + margin.left + margin.right,
                 rc.bottom - rc.top + margin.top + margin.bottom,
@@ -705,7 +717,7 @@ impl Win32WindowAdapter {
                 frame.0,
                 frame.1,
                 owner,
-                None,
+                menu,
                 Some(instance.into()),
                 None,
             )
@@ -821,6 +833,24 @@ impl Win32WindowAdapter {
         self.popup.as_ref().map(|p| p.margin.get()).unwrap_or_default()
     }
 
+    /// The HWND of the window that isn't a popup, this one or the one its popups belong to.
+    fn top_level_hwnd(&self) -> Option<HWND> {
+        match &self.popup {
+            Some(popup) => popup.parent.upgrade()?.top_level_hwnd(),
+            None => self.hwnd.get(),
+        }
+    }
+
+    /// Keeps the client size when the menu bar appears or goes, which changes the frame.
+    fn menu_bar_changed(&self) {
+        let Some(hwnd) = self.hwnd.get() else { return };
+        if let Some(logical) = self.logical_size.get()
+            && !unsafe { IsZoomed(hwnd).as_bool() }
+        {
+            self.set_size(WindowSize::Logical(logical));
+        }
+    }
+
     /// The size of what the core lays out in a client area of `client` pixels.
     fn content_size(&self, client: PhysicalSize) -> PhysicalSize {
         let margin = self.margin();
@@ -894,7 +924,8 @@ impl Win32WindowAdapter {
         unsafe {
             let style = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
             let ex_style = WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32);
-            let _ = AdjustWindowRectExForDpi(&mut rc, style, false, ex_style, dpi);
+            let has_menu = !GetMenu(hwnd).is_invalid();
+            let _ = AdjustWindowRectExForDpi(&mut rc, style, has_menu, ex_style, dpi);
         }
         let margin = self.margin();
         (
@@ -1152,6 +1183,25 @@ impl WindowAdapterInternal for Win32WindowAdapter {
         let parent = self.popup.as_ref()?.parent.upgrade()?;
         Some(parent as Rc<dyn WindowAdapter>)
     }
+
+    /// Detached windows have no native menus, as upstream's testing backend.
+    fn supports_native_menu_bar(&self) -> bool {
+        !self.detached && self.popup.is_none() && !menu::disabled()
+    }
+
+    fn setup_menubar(&self, menubar: vtable::VRc<crate::menus::MenuVTable>) {
+        self.menu_bar.set(self, &menubar);
+    }
+
+    fn show_native_popup_menu(
+        &self,
+        context_menu_item: vtable::VRc<crate::menus::MenuVTable>,
+        position: crate::api::LogicalPosition,
+    ) -> bool {
+        !self.detached
+            && !menu::disabled()
+            && menu::request_context_menu(self, context_menu_item, position)
+    }
 }
 
 impl Drop for Win32WindowAdapter {
@@ -1186,7 +1236,12 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 return result;
             }
         }
-        None => popup::handle_owner(&adapter, msg, wp),
+        None => {
+            popup::handle_owner(&adapter, msg, wp);
+            if let Some(result) = adapter.menu_bar.handle(&adapter, hwnd, msg, wp, lp) {
+                return result;
+            }
+        }
     }
     if let Some(result) = input::handle(&adapter, hwnd, msg, wp, lp) {
         return result;
@@ -1203,6 +1258,10 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     match msg {
         WM_APP_SYNC => {
             adapter.sync();
+            LRESULT(0)
+        }
+        menu::WM_APP_CONTEXT_MENU => {
+            menu::open_context_menu(&adapter, hwnd);
             LRESULT(0)
         }
         WM_SIZE if wp.0 != SIZE_MINIMIZED as usize => {

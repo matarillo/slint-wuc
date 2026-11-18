@@ -45,8 +45,16 @@ A popup then isn't cut off at the edge of its window, which a combo box near the
 
 As upstream's winit backend does on Windows with `muda`:
 
-- A `MenuBar` is a Win32 menu bar (`SetMenu`), built from the `MenuVTable` entries and rebuilt when they change.
-- A `ContextMenu` opens with `TrackPopupMenuEx`.
+- A `MenuBar` is the window's Win32 menu bar, built from the `MenuVTable` entries.
+  - A property tracker rebuilds the whole menu when what it shows changes.
+    While a menu is open, the rebuild waits for `WM_EXITMENULOOP`.
+  - The window is created with its menu, and the frame keeps room for it, so the client area keeps its size.
+  - `WM_COMMAND` activates the entry.
+    The core matches the shortcuts itself, as upstream does, so the menu only shows them after a tab.
+- A `ContextMenu` opens a Win32 popup menu with `TrackPopupMenuEx`.
+  The core asks for it while it handles the right click.
+  The menu runs a message loop of its own, so the host opens it from a posted message, once the click is handled.
+- Entries map to Win32 menu items as in `muda`: a check mark for a checkable entry, otherwise its icon as a 16×16 bitmap, and `MF_GRAYED` when disabled.
 - `SLINT_NO_MUDA` turns both off, as upstream does, and the core draws the menus in popups instead.
 - A detached window has no native menus, as upstream's testing backend.
 
