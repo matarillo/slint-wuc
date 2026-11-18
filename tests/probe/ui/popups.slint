@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import { ComboBox } from "std-widgets.slint";
+
+export component Popups inherits Window {
+    width: 300px;
+    height: 200px;
+
+    combo := ComboBox {
+        x: 10px;
+        y: 10px;
+        model: ["A", "B", "C"];
+    }
+
+    out property <int> index: combo.current-index;
+
+    public function focus-combo() {
+        combo.focus();
+    }
+}

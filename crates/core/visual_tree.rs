@@ -225,6 +225,7 @@ impl VisualUpdate<'_> {
     /// strokes the border. Without border or radius it's a plain [`Self::fill`].
     pub fn border_rect(&mut self, rect: Pin<&dyn RenderBorderRectangle>, size: LogicalSize) {
         let Some(layout) = BorderRectLayout::new(rect, size, ScaleFactor::new(1.)) else {
+            self.remove_floor();
             self.plain();
             return;
         };
@@ -977,6 +978,27 @@ mod tests {
   Container 0,0 10x10
 "
         );
+    }
+
+    #[test]
+    fn an_empty_border_rectangle_drops_its_shape() {
+        use crate::lengths::LogicalLength;
+        let tree = crate::testing::BorderTree::new((100., 50.), 0);
+        let root = tree.rect(0);
+        root.background.set(red());
+        root.border_top_left_radius.set(LogicalLength::new(2.));
+        let dyn_tree = vtable::VRc::into_dyn(tree.clone());
+        let mut visuals = new_tree();
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(
+            print(&visuals),
+            "Container 0,0 100x50\n  Shape -1,-1 102x52 [fill #ff0000ff path]\n"
+        );
+
+        // As Fluent's list item hides its selection marker: the height becomes 0.
+        tree.geometry(0).set(LogicalRect::new(euclid::point2(0., 0.), euclid::size2(100., 0.)));
+        sync(&mut visuals, &dyn_tree);
+        assert_eq!(print(&visuals), "Container 0,0 100x0\n");
     }
 
     #[test]

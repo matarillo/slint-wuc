@@ -42,6 +42,10 @@ path = "src/snapshot.rs"
 name = "probe-gallery"
 path = "src/gallery.rs"
 
+[[bin]]
+name = "probe-popups"
+path = "src/popups.rs"
+
 [dependencies]
 slint = { path = "../../crates/slint" }
 # For the visual tree dump of `--check`.
