@@ -521,6 +521,8 @@ pub struct Win32WindowAdapter {
     ime_requests: RefCell<alloc::vec::Vec<crate::window::InputMethodRequest>>,
     ime: ime::Ime,
     popup: Option<popup::Popup>,
+    /// Whether the title bar is dark, once the host has set it.
+    dark_title_bar: Cell<Option<bool>>,
 }
 
 impl Win32WindowAdapter {
@@ -582,6 +584,7 @@ impl Win32WindowAdapter {
             ime_requests: Default::default(),
             ime: Default::default(),
             popup,
+            dark_title_bar: Cell::new(None),
         }))
     }
 
@@ -718,7 +721,7 @@ impl Win32WindowAdapter {
         };
         self.hwnd.set(Some(hwnd));
         ime::window_created(hwnd);
-        theme::apply(&self.window, hwnd);
+        theme::apply(&self.window, hwnd, &self.dark_title_bar);
         let renderer = &self.renderer;
         let compositor = renderer.tree.borrow().compositor().clone();
         let interop: ICompositorDesktopInterop = compositor.cast().map_err(err)?;
@@ -1307,7 +1310,7 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         // The app mode, a high contrast theme, or the accent color may have changed.
         WM_SETTINGCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
-            theme::apply(&adapter.window, hwnd);
+            theme::apply(&adapter.window, hwnd, &adapter.dark_title_bar);
             unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
