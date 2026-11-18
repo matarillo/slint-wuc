@@ -7,8 +7,9 @@
 //! cargo run -p ui-check -- [--only upstream|fork] [scenario...]
 //! ```
 //!
-//! Build the galleries first, with `SLINT_STYLE=fluent`: `tools/upstream-gallery` (its own
-//! workspace) and `probe-gallery`. Both show their windows for a few seconds: upstream's on
+//! Build the galleries first, with `SLINT_STYLE=fluent`, into the target directory of this tool:
+//! `tools/upstream-gallery` (its own workspace) and `probe-gallery`.
+//! Both show their windows for a few seconds: upstream's on
 //! winit with its software renderer, which draws popups inside the window as the fork's
 //! snapshots do.
 //! The images go to `manual-checks/ui-check/<scenario>/`, with `report.tsv` listing how much each
@@ -19,7 +20,7 @@ mod compare;
 mod mcp;
 mod scenarios;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
 
@@ -37,13 +38,13 @@ impl Side {
         }
     }
 
-    fn launch(self, root: &Path, port: u16) -> Result<Child, String> {
+    fn launch(self, port: u16) -> Result<Child, String> {
+        // The galleries are built into the same target directory as this tool.
+        let dir = std::env::current_exe().map_err(|e| e.to_string())?;
+        let dir = dir.parent().ok_or("no directory for the executable")?;
         let (exe, backend) = match self {
-            Side::Upstream => (
-                root.join("tools/upstream-gallery/target/debug/upstream-gallery.exe"),
-                Some("winit-software"),
-            ),
-            Side::Fork => (root.join("target/debug/probe-gallery.exe"), None),
+            Side::Upstream => (dir.join("upstream-gallery.exe"), Some("winit-software")),
+            Side::Fork => (dir.join("probe-gallery.exe"), None),
         };
         let mut command = Command::new(&exe);
         // The same scale factor on both sides, whatever the monitor's, and menus that Slint
@@ -74,9 +75,9 @@ fn free_port() -> u16 {
 }
 
 /// Runs `scenario` on `side`, returning the screenshot of each step.
-fn run(side: Side, root: &Path, scenario: &scenarios::Scenario) -> Result<Vec<Vec<u8>>, String> {
+fn run(side: Side, scenario: &scenarios::Scenario) -> Result<Vec<Vec<u8>>, String> {
     let port = free_port();
-    let _gallery = Running(side.launch(root, port)?);
+    let _gallery = Running(side.launch(port)?);
     let client = mcp::Client::connect(port, Duration::from_secs(30))?;
     let mut app = app::App::new(client)?;
     let mut shots = Vec::new();
@@ -117,7 +118,7 @@ fn main() {
         std::fs::create_dir_all(&out).unwrap();
         let mut shots = Vec::new();
         for &side in &sides {
-            match run(side, &root, scenario) {
+            match run(side, scenario) {
                 Ok(s) => shots.push((side, s)),
                 Err(e) => {
                     eprintln!("{}: {e}", scenario.name);
