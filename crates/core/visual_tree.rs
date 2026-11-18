@@ -29,7 +29,8 @@ use shapes::ui_color;
 use std::collections::HashSet;
 use windows::UI::Composition::{
     CompositionBorderMode, CompositionBrush, CompositionClip, CompositionColorBrush,
-    CompositionEffectBrush, Compositor, ContainerVisual, InsetClip, ShapeVisual, SpriteVisual,
+    CompositionEffectBrush, CompositionShapeCollection, CompositionSpriteShape, Compositor,
+    ContainerVisual, InsetClip, ShapeVisual, SpriteVisual,
 };
 use windows::core::Interface;
 use windows_numerics::{Matrix4x4, Vector2, Vector3};
@@ -87,6 +88,9 @@ struct Node {
     pass: u64,
     /// The parent node as of that pass; `None` for the root of an item tree.
     parent: Option<usize>,
+    /// When the node was created, in `VisualTree::created` order. Slab ids are reused, so they
+    /// don't tell.
+    serial: u64,
 }
 
 /// What an item's `update_visual` works with: its node's visual and the compositor.
@@ -264,6 +268,9 @@ impl VisualUpdate<'_> {
         let (visual, origin) = self.shape(size);
         let _ = visual.SetBorderMode(border_mode);
         let shapes = visual.Shapes().unwrap();
+        if self.update_border_shapes(&shapes, &layout, &background, origin) {
+            return;
+        }
         let _ = shapes.Clear();
         if let Some(brush) = self.brush(&rect.background(), layout.brush_size)
             && let Ok(geometry) =
@@ -284,6 +291,55 @@ impl VisualUpdate<'_> {
             let _ = shape.SetStrokeThickness(layout.border_width.get());
             let _ = shapes.Append(&shape);
         }
+    }
+
+    /// Updates the shapes of an earlier [`Self::border_rect`] in place, and returns whether they
+    /// had the right kinds. Replacing Composition objects costs more the more objects the window
+    /// has, so a whole list of rounded rectangles that change color would take seconds.
+    fn update_border_shapes(
+        &self,
+        shapes: &CompositionShapeCollection,
+        layout: &BorderRectLayout,
+        background: &crate::Brush,
+        origin: Vector2,
+    ) -> bool {
+        let fill = !background.is_transparent();
+        let stroke = layout.border_width.get() > 0. && !layout.border_color.is_transparent();
+        if shapes.Size().ok() != Some(u32::from(fill) + u32::from(stroke)) {
+            return false;
+        }
+        let parts = [
+            (fill, false, layout.background_rect, layout.background_radius, background),
+            (stroke, true, layout.border_rect, layout.border_radius, &layout.border_color),
+        ];
+        let mut index = 0;
+        for (wanted, is_stroke, rect, radius, brush) in parts {
+            if !wanted {
+                continue;
+            }
+            let Ok(shape) = shapes.GetAt(index).and_then(|s| s.cast::<CompositionSpriteShape>())
+            else {
+                return false;
+            };
+            index += 1;
+            let current = if is_stroke { shape.StrokeBrush() } else { shape.FillBrush() };
+            let Ok(current) = current else { return false };
+            if !shapes::update_rounded_rect(&shape, rect, radius) {
+                return false;
+            }
+            let _ = shape.SetOffset(origin);
+            if let crate::Brush::SolidColor(color) = brush
+                && let Ok(current) = current.cast::<CompositionColorBrush>()
+            {
+                let _ = current.SetColor(ui_color(*color));
+            } else if let Some(new) = self.brush(brush, layout.brush_size) {
+                let _ = if is_stroke { shape.SetStrokeBrush(&new) } else { shape.SetFillBrush(&new) };
+            }
+            if is_stroke {
+                let _ = shape.SetStrokeThickness(layout.border_width.get());
+            }
+        }
+        true
     }
 
     /// Makes the node a plain container that draws its children as a group with `opacity`,
@@ -475,6 +531,16 @@ impl VisualUpdate<'_> {
     }
 }
 
+/// Drops `nodes` in the reverse order of their creation. Releasing Composition objects oldest
+/// first takes time quadratic in their number: 2000 text rows took 6 s to release, against
+/// 43 ms newest first.
+fn release_newest_first(mut nodes: Vec<Node>) {
+    nodes.sort_unstable_by_key(|n| core::cmp::Reverse(n.serial));
+    for node in nodes {
+        drop(node);
+    }
+}
+
 static NEXT_GENERATION: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(1);
 
 /// The visuals of one window.
@@ -485,6 +551,8 @@ pub struct VisualTree {
     /// Distinguishes this tree's handles in `CachedRenderingData` from other trees'.
     generation: usize,
     pass: u64,
+    /// The number of nodes created so far, for `Node::serial`.
+    created: u64,
     /// The top-level nodes (main item tree, popups, overlays) of the last pass.
     roots: Vec<usize>,
 }
@@ -498,6 +566,7 @@ impl VisualTree {
             nodes: slab::Slab::new(),
             generation: NEXT_GENERATION.fetch_add(1, core::sync::atomic::Ordering::Relaxed),
             pass: 0,
+            created: 0,
             roots: Vec::new(),
         }
     }
@@ -525,6 +594,7 @@ impl VisualTree {
             }
         }
         let visual = self.compositor.CreateContainerVisual().unwrap();
+        self.created += 1;
         let index = self.nodes.insert(Node {
             visual,
             kind: VisualKind::Container,
@@ -537,6 +607,7 @@ impl VisualTree {
             floor: None,
             pass: 0,
             parent: None,
+            serial: self.created,
         });
         data.cache_index.set(index);
         data.cache_generation.set(self.generation);
@@ -696,13 +767,13 @@ impl VisualTree {
             .filter(|(_, n)| n.pass != pass && n.item.upgrade().is_none())
             .map(|(i, _)| i)
             .collect();
-        for index in stale {
-            self.nodes.remove(index);
-        }
+        let stale = stale.into_iter().map(|index| self.nodes.remove(index)).collect();
+        release_newest_first(stale);
     }
 
     /// Releases the nodes of `items`, which are being destroyed.
     pub fn release_items<'a>(&mut self, items: &mut dyn Iterator<Item = Pin<ItemRef<'a>>>) {
+        let mut released = Vec::new();
         for item in items {
             let data = item.cached_rendering_data_offset();
             if data.cache_generation.get() == self.generation {
@@ -718,10 +789,12 @@ impl VisualTree {
                         None => &mut self.roots,
                     };
                     siblings.retain(|id| *id != index);
+                    released.push(node);
                 }
                 data.cache_generation.set(0);
             }
         }
+        release_newest_first(released);
     }
 
     /// The number of sync passes so far, for tests.

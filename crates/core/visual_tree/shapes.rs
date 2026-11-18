@@ -188,6 +188,25 @@ pub(super) fn rounded_rect(
     path_geometry(c, rounded_rect_path(rect, radius)?)
 }
 
+/// Moves and resizes the rounded rectangle geometry of `shape` to `rect` with `radius`, as
+/// [`rounded_rect`] would make it, and returns whether it could: a geometry for corners of
+/// different radii is a path, which can't change in place.
+pub(super) fn update_rounded_rect(
+    shape: &CompositionSpriteShape,
+    rect: euclid::Rect<f32, PhysicalPx>,
+    radius: PhysicalBorderRadius,
+) -> bool {
+    let Some(r) = clamp_radius(rect.size, radius).as_uniform() else { return false };
+    let Ok(g) = shape.Geometry().and_then(|g| g.cast::<CompositionRoundedRectangleGeometry>())
+    else {
+        return false;
+    };
+    let _ = g.SetOffset(vector(rect.origin));
+    let _ = g.SetSize(Vector2 { X: rect.width(), Y: rect.height() });
+    let _ = g.SetCornerRadius(Vector2 { X: r, Y: r });
+    true
+}
+
 /// Whether a sprite shape can't show `brush`: Composition shapes take color and gradient
 /// brushes, but not the surface brush of a conic gradient.
 pub(super) fn needs_sprite(brush: &Brush) -> bool {
