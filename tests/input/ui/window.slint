@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// A window whose frame and state follow properties, and record what the window reports.
+export component WindowTest inherits Window {
+    in property <bool> frameless;
+    in property <bool> on-top;
+    in property <bool> fixed-size;
+    in property <bool> with-icon;
+    in-out property <bool> is-maximized <=> root.maximized;
+    in-out property <bool> is-minimized <=> root.minimized;
+    no-frame: root.frameless;
+    always-on-top: root.on-top;
+    resize-border-width: 5px;
+    // A 1×1 red PNG.
+    icon: root.with-icon ? @image-url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==") : @image-url("");
+
+    VerticalLayout {
+        Rectangle {
+            min-width: 200px;
+            max-width: root.fixed-size ? 200px : 10000px;
+            min-height: 100px;
+            max-height: root.fixed-size ? 100px : 10000px;
+        }
+    }
+}

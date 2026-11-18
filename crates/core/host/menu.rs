@@ -8,7 +8,6 @@ mod dark_bar;
 use super::Win32WindowAdapter;
 use crate::SharedVector;
 use crate::api::LogicalPosition;
-use crate::graphics::Image;
 use crate::items::{ColorScheme, MenuEntry};
 use crate::menus::MenuVTable;
 use crate::properties::{PropertyDirtyHandler, PropertyTracker};
@@ -18,10 +17,7 @@ use core::cell::{Cell, RefCell};
 use core::pin::Pin;
 use vtable::{VRc, VWeak};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, ClientToScreen, CreateDIBSection, DIB_RGB_COLORS,
-    DeleteObject, HBITMAP,
-};
+use windows::Win32::Graphics::Gdi::{ClientToScreen, DeleteObject, HBITMAP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateMenu, CreatePopupMenu, DefWindowProcW, DestroyMenu, DrawMenuBar,
     GetMenuItemCount, HMENU, MENUITEMINFOW, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR,
@@ -123,7 +119,8 @@ impl NativeMenu {
         let _ = unsafe { AppendMenuW(parent, flags, command, &title) };
         // As in `muda`, a checkable entry shows its check mark instead of its icon.
         if !entry.checkable
-            && let Some(bitmap) = icon_bitmap(&entry.icon)
+            && let Some(bitmap) =
+                super::bitmap::scaled(&entry.icon, ICON_SIZE, super::bitmap::Alpha::Premultiplied)
         {
             self.bitmaps.push(bitmap);
             let info = MENUITEMINFOW {
@@ -159,70 +156,6 @@ fn title(entry: &MenuEntry) -> HSTRING {
     } else {
         HSTRING::from(alloc::format!("{}\t{}", entry.title, entry.shortcut))
     }
-}
-
-/// `icon` as a 32-bit bitmap with premultiplied alpha, which menus draw with transparency.
-fn icon_bitmap(icon: &Image) -> Option<HBITMAP> {
-    let pixels = icon.to_rgba8_premultiplied()?;
-    let (width, height) = (pixels.width() as usize, pixels.height() as usize);
-    if width == 0 || height == 0 {
-        return None;
-    }
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: ICON_SIZE as i32,
-            // Top-down.
-            biHeight: -(ICON_SIZE as i32),
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut bits = core::ptr::null_mut();
-    let bitmap =
-        unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
-    if bits.is_null() {
-        unsafe {
-            let _ = DeleteObject(bitmap.into());
-        }
-        return None;
-    }
-    // SAFETY: the section holds ICON_SIZE² pixels of 4 bytes.
-    let target =
-        unsafe { core::slice::from_raw_parts_mut(bits as *mut u8, ICON_SIZE * ICON_SIZE * 4) };
-    // Each target pixel averages the source pixels it covers.
-    let source = pixels.as_slice();
-    for ty in 0..ICON_SIZE {
-        let (y0, y1) = span(ty, height);
-        for tx in 0..ICON_SIZE {
-            let (x0, x1) = span(tx, width);
-            let mut sum = [0u32; 4];
-            for y in y0..y1 {
-                for p in &source[y * width + x0..y * width + x1] {
-                    sum[0] += p.b as u32;
-                    sum[1] += p.g as u32;
-                    sum[2] += p.r as u32;
-                    sum[3] += p.a as u32;
-                }
-            }
-            let count = ((y1 - y0) * (x1 - x0)) as u32;
-            let offset = (ty * ICON_SIZE + tx) * 4;
-            for (target, sum) in target[offset..offset + 4].iter_mut().zip(sum) {
-                *target = (sum / count) as u8;
-            }
-        }
-    }
-    Some(bitmap)
-}
-
-/// The source pixels that target pixel `i` of [`ICON_SIZE`] covers, at least one.
-fn span(i: usize, source: usize) -> (usize, usize) {
-    let start = i * source / ICON_SIZE;
-    let end = ((i + 1) * source / ICON_SIZE).max(start + 1).min(source);
-    (start.min(source - 1), end)
 }
 
 /// The menu bar of a window, rebuilt when what the menu shows changes.
@@ -295,14 +228,16 @@ impl MenuBar {
         let had_menu = self.native.borrow().is_some();
         let old = self.native.take();
         let hmenu = self.build();
-        unsafe {
+        let set_menu = || unsafe {
             let _ = SetMenu(hwnd, hmenu);
             let _ = DrawMenuBar(hwnd);
+        };
+        if had_menu != hmenu.is_some() {
+            adapter.change_frame(set_menu);
+        } else {
+            set_menu();
         }
         drop(old);
-        if had_menu != hmenu.is_some() {
-            adapter.menu_bar_changed();
-        }
     }
 
     /// Whether the window has a native menu bar and the system's color scheme is dark.

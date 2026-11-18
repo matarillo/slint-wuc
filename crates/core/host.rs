@@ -51,6 +51,8 @@ use windows::core::{HSTRING, Interface, w};
 
 #[cfg(feature = "accessibility")]
 mod accesskit;
+mod bitmap;
+mod frame;
 mod ime;
 mod input;
 mod keyboard;
@@ -508,6 +510,8 @@ pub struct Win32WindowAdapter {
     logical_size: Cell<Option<LogicalSize>>,
     /// Set while `WM_DPICHANGED` resizes the window, whose `WM_SIZE` keeps `logical_size`.
     in_dpi_change: Cell<bool>,
+    /// Set while the frame changes, whose `WM_SIZE` keeps `logical_size`.
+    in_frame_change: Cell<bool>,
     constraints: Cell<crate::window::LayoutConstraints>,
     /// The title, kept for when the HWND is created.
     title: RefCell<HSTRING>,
@@ -526,6 +530,7 @@ pub struct Win32WindowAdapter {
     popup: Option<popup::Popup>,
     /// Whether the title bar is dark, once the host has set it.
     dark_title_bar: Cell<Option<bool>>,
+    frame: frame::Frame,
     menu_bar: menu::MenuBar,
     context_menu: RefCell<Option<menu::PendingContextMenu>>,
     #[cfg(feature = "accessibility")]
@@ -579,6 +584,7 @@ impl Win32WindowAdapter {
             size_set: Cell::new(false),
             logical_size: Cell::new(None),
             in_dpi_change: Cell::new(false),
+            in_frame_change: Cell::new(false),
             constraints: Cell::new(Default::default()),
             title: RefCell::new(HSTRING::new()),
             sync_pending: Cell::new(false),
@@ -592,6 +598,7 @@ impl Win32WindowAdapter {
             ime: Default::default(),
             popup,
             dark_title_bar: Cell::new(None),
+            frame: Default::default(),
             menu_bar: menu::MenuBar::new(weak.clone()),
             context_menu: Default::default(),
             #[cfg(feature = "accessibility")]
@@ -688,18 +695,30 @@ impl Win32WindowAdapter {
             let margin = self.margin();
             let (style, ex_style) = match &self.popup {
                 Some(_) => (popup::Popup::STYLE, popup::Popup::EX_STYLE),
-                None => (WS_OVERLAPPEDWINDOW, WS_EX_NOREDIRECTIONBITMAP),
+                None => {
+                    let (style, ex_style) = self.frame.styles();
+                    // GDI draws a menu bar into the redirection surface; without one, it's
+                    // transparent.
+                    let redirection = if self.has_redirection_surface() {
+                        WINDOW_EX_STYLE(0)
+                    } else {
+                        WS_EX_NOREDIRECTIONBITMAP
+                    };
+                    (style, ex_style | redirection)
+                }
             };
             let menu = if self.popup.is_none() { self.menu_bar.build() } else { None };
             let mut rc =
                 RECT { left: 0, top: 0, right: size.width as i32, bottom: size.height as i32 };
-            let _ = AdjustWindowRectExForDpi(
-                &mut rc,
-                style,
-                menu.is_some(),
-                ex_style,
-                GetDpiForSystem(),
-            );
+            if self.popup.is_some() || !self.frame.client_covers_window() {
+                let _ = AdjustWindowRectExForDpi(
+                    &mut rc,
+                    style,
+                    menu.is_some(),
+                    ex_style,
+                    GetDpiForSystem(),
+                );
+            }
             let frame = (
                 rc.right - rc.left + margin.left + margin.right,
                 rc.bottom - rc.top + margin.top + margin.bottom,
@@ -742,11 +761,19 @@ impl Win32WindowAdapter {
         #[cfg(feature = "accessibility")]
         let _ = self.accesskit.set(accesskit::AccessKit::new(self.self_weak.clone(), hwnd));
         ime::window_created(hwnd);
+        if self.popup.is_none() {
+            self.frame.created(hwnd);
+            if let Some(item) = self.inner().window_item() {
+                self.frame.set_icon(hwnd, &item.as_pin_ref().icon());
+            }
+        }
         theme::apply(&self.window, hwnd, &self.dark_title_bar);
         let renderer = &self.renderer;
         let compositor = renderer.tree.borrow().compositor().clone();
         let interop: ICompositorDesktopInterop = compositor.cast().map_err(err)?;
-        let target = unsafe { interop.CreateDesktopWindowTarget(hwnd, false) }.map_err(err)?;
+        // Over the redirection surface, if any, which shows only where the visuals don't.
+        let topmost = self.has_redirection_surface();
+        let target = unsafe { interop.CreateDesktopWindowTarget(hwnd, topmost) }.map_err(err)?;
         target.SetRoot(renderer.tree.borrow().root()).map_err(err)?;
         *self.target.borrow_mut() = Some(target);
         self.offset_root();
@@ -860,6 +887,12 @@ impl Win32WindowAdapter {
         })
     }
 
+    /// Whether the window keeps a GDI redirection surface: a top-level window that can have a
+    /// native menu bar.
+    fn has_redirection_surface(&self) -> bool {
+        self.popup.is_none() && !menu::disabled()
+    }
+
     fn top_level_hwnd(&self) -> Option<HWND> {
         match &self.popup {
             Some(popup) => popup.parent.upgrade()?.top_level_hwnd(),
@@ -867,14 +900,21 @@ impl Win32WindowAdapter {
         }
     }
 
-    /// Keeps the client size when the menu bar appears or goes, which changes the frame.
-    fn menu_bar_changed(&self) {
-        let Some(hwnd) = self.hwnd.get() else { return };
-        if let Some(logical) = self.logical_size.get()
-            && !unsafe { IsZoomed(hwnd).as_bool() }
-        {
-            self.set_size(WindowSize::Logical(logical));
+    /// Changes the frame with `change`, such as showing the menu bar, and keeps the client
+    /// size. The `WM_SIZE` that the change sends doesn't come from the user.
+    fn change_frame(&self, change: impl FnOnce()) {
+        let Some(hwnd) = self.hwnd.get() else { return change() };
+        let logical = self
+            .logical_size
+            .get()
+            .unwrap_or_else(|| self.size.get().to_logical(self.window.scale_factor()));
+        self.in_frame_change.set(true);
+        change();
+        self.in_frame_change.set(false);
+        if self.frame.sized_by_state() || unsafe { IsZoomed(hwnd).as_bool() } {
+            return;
         }
+        self.set_size(WindowSize::Logical(logical));
     }
 
     /// The size of what the core lays out in a client area of `client` pixels.
@@ -947,6 +987,9 @@ impl Win32WindowAdapter {
     fn frame_size(&self, hwnd: HWND, client: PhysicalSize, dpi: u32) -> (i32, i32) {
         let mut rc =
             RECT { left: 0, top: 0, right: client.width as i32, bottom: client.height as i32 };
+        if self.popup.is_none() && self.frame.client_covers_window() {
+            return (rc.right, rc.bottom);
+        }
         unsafe {
             let style = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
             let ex_style = WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32);
@@ -1014,10 +1057,14 @@ impl WindowAdapter for Win32WindowAdapter {
             let show = match (visible, &self.popup) {
                 (false, _) => SW_HIDE,
                 (true, Some(_)) => SW_SHOWNOACTIVATE,
-                (true, None) => SW_SHOW,
+                (true, None) => self.frame.show_command(),
             };
             unsafe {
                 let _ = ShowWindow(hwnd, show);
+            }
+            if visible && self.popup.is_none() {
+                self.frame.showing();
+                self.frame.apply(self, hwnd, true);
             }
         }
         self.visible.set(visible);
@@ -1133,6 +1180,19 @@ impl WindowAdapter for Win32WindowAdapter {
 
         let constraints = properties.layout_constraints();
         self.constraints.set(constraints);
+        if self.popup.is_none()
+            && let Some(item) = self.inner().window_item()
+        {
+            let item = item.as_pin_ref();
+            self.frame.update(item, constraints);
+            if let Some(hwnd) = self.hwnd.get() {
+                self.frame.apply(self, hwnd, self.visible.get());
+                self.frame.set_icon(hwnd, &item.icon());
+            }
+            if self.frame.sized_by_state() && !self.detached {
+                return;
+            }
+        }
         let current = self.size.get().to_logical(self.window.scale_factor());
         if self.popup.is_some() {
             // As a popup drawn inside its window: the layout's preferred size, as it changes.
@@ -1306,6 +1366,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             if let Some(result) = adapter.menu_bar.handle(&adapter, hwnd, msg, wp, lp) {
                 return result;
             }
+            if let Some(result) = adapter.frame.handle(&adapter, hwnd, msg, wp, lp) {
+                return result;
+            }
         }
     }
     if let Some(result) = input::handle(&adapter, hwnd, msg, wp, lp) {
@@ -1335,7 +1398,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             // A size that the intended logical size doesn't explain comes from the user.
             let intended =
                 adapter.logical_size.get().map(|l| to_physical(l, adapter.content_dpi()));
-            let from_user = !adapter.in_dpi_change.get() && intended != Some(size);
+            let from_user = !adapter.in_dpi_change.get()
+                && !adapter.in_frame_change.get()
+                && intended != Some(size);
             if from_user {
                 adapter.logical_size.set(Some(size.to_logical(adapter.window.scale_factor())));
             }

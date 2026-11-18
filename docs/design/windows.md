@@ -55,6 +55,8 @@ As upstream's winit backend does on Windows with `muda`:
   The core asks for it while it handles the right click.
   The menu runs a message loop of its own, so the host opens it from a posted message, once the click is handled.
 - Entries map to Win32 menu items as in `muda`: a check mark for a checkable entry, otherwise its icon as a 16×16 bitmap, and `MF_GRAYED` when disabled.
+- GDI draws the menu bar into the window's redirection surface, which `WS_EX_NOREDIRECTIONBITMAP` leaves out.
+  So a top-level window keeps it unless `SLINT_NO_MUDA` is set, and its composition target is topmost, over that surface.
 - Windows draws a menu bar light whatever the color scheme.
   When the scheme is dark, the host draws the bar on the undocumented `WM_UAHDRAWMENU` and `WM_UAHDRAWMENUITEM` messages, in `muda`'s colors.
 - `SLINT_NO_MUDA` turns both off, as upstream does, and the core draws the menus in popups instead.
@@ -79,6 +81,25 @@ AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `acc
   The tree's bounds take the popup's margin into account.
 - The facade's `accessibility` feature, on by default as upstream, turns this on.
 - Not yet done: a popup with the keys of its owner, such as a combo box's list, doesn't tell UI Automation that it has the focus.
+
+## Window Properties
+
+The host applies the `Window` item's properties as upstream's winit backend does on Windows (`host/frame.rs`).
+
+- `no-frame`: `WS_POPUP`, with `WS_THICKFRAME` kept for the shadow and for resizing.
+  `WM_NCCALCSIZE` makes the whole window client area.
+  `WM_NCHITTEST` makes a border of `resize-border-width` resize it.
+- A window whose minimum and maximum sizes are equal loses `WS_THICKFRAME` and `WS_MAXIMIZEBOX`, as winit's `set_resizable(false)`.
+- `always-on-top`: `HWND_TOPMOST`.
+- `full-screen`: `WS_POPUP` over the monitor.
+  The window's style and placement come back when full screen ends.
+- `maximized` and `minimized` show the window that way.
+  A hidden window takes them when it's shown.
+  When the user changes them, `WM_SIZE` sets the properties, as winit's `window_state_event`.
+  A minimized window stays maximized, to come back maximized.
+- `icon`: big and small icons at the system metrics' sizes.
+- A frame change keeps the client size, so the `WM_SIZE` it sends doesn't count as the user's.
+- `Dialog` needs nothing more: the core orders its buttons for Windows.
 
 ## System Settings
 
