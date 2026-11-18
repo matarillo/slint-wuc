@@ -173,6 +173,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - [Opus] アクセシビリティの統合方針 (`ItemTreeVTable` の a11y エントリから UI Automation へ、`accesskit_windows` を第一候補)。
 - [Sonnet] アクセシビリティの実装と、popups / menus / accessibility 系テストの移植。
 - **ゲート** [Opus]: 該当テストが通る。fluent スタイルのウィジェットギャラリーがプローブで動く。
+- **状態**: 閉じた (2026-11-18)。上流の popups・accessibility・elements (Dialog、SystemTrayIcon を含む) のケースが通り、残りはテスト用バックエンドとインタープリターを待つ (Phase 7、`tests/driver/exclusions.rs`)。`tools/ui-check` で、ギャラリーのコンボボックス、Slint が描くメニューバーとサブメニュー、ツールチップ、入力欄のコンテキストメニューが上流と同じ大きさ・配置になることを確かめた (差は文字のラスタライズのみ)。ネイティブのメニューバー (ダークモードの描画を含む)、コンテキストメニュー、`probe-tray` のトレイアイコンは手動確認した。設計は `docs/design/windows.md`。アクセシビリティは AccessKit を移植し、UI Automation クライアントからのテストを `tests/input` に置いた。持ち越し: キー入力を受け取るポップアップ (コンボボックスの一覧など) がフォーカスを UI Automation に伝えること、OLE によるアプリ間のドラッグ&ドロップ (上流の winit にもないため Phase 7 の後)。
 
 ### Phase 7 — 互換性の仕上げと堅牢化 (Sonnet 中心)
 - [Sonnet] `rtti` と `ffi` を全 item で有効にし、cbindgen のヘッダー生成を通す。

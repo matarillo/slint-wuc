@@ -11,9 +11,9 @@ const TESTING_BACKEND: &str = concat!(
     "TestingBackend (upstream's testing platform, for a SlintContext of its own) and ",
     "slint::platform::Platform, which the fork keeps out of its public API, phase 7"
 );
-const TESTING_BACKEND_AND_TRAY: &str = concat!(
-    "TestingBackend (upstream's testing platform, for a SlintContext of its own, with open_url), ",
-    "phase 7, and SystemTrayIcon and the Platform global, phase 6"
+const TESTING_BACKEND_OPEN_URL: &str = concat!(
+    "TestingBackend (upstream's testing platform, for a SlintContext of its own, ",
+    "that records open_url), phase 7"
 );
 
 /// Cases that are generated and compiled, but ignored when running.
@@ -29,7 +29,7 @@ pub const NOT_BUILT: &[(&str, &str)] = &[
     ("elements/component_container_init_focus_in_layout.slint", INTERPRETER),
     ("elements/component_container_layout.slint", INTERPRETER),
     ("elements/component_container_size.slint", INTERPRETER),
-    ("elements/systemtray_context.slint", TESTING_BACKEND_AND_TRAY),
+    ("elements/systemtray_context.slint", TESTING_BACKEND_OPEN_URL),
     ("elements/timer_own_context.slint", TESTING_BACKEND),
     ("elements/window_shared_adapter_context.slint", TESTING_BACKEND),
     ("text/componentcontainer_font_size_propagation.slint", INTERPRETER),
