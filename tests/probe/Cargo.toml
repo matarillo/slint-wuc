@@ -46,6 +46,10 @@ path = "src/gallery.rs"
 name = "probe-popups"
 path = "src/popups.rs"
 
+[[bin]]
+name = "probe-tray"
+path = "src/tray.rs"
+
 [dependencies]
 # `mcp` starts the MCP server when `SLINT_MCP_PORT` is set, for `tools/ui-check`.
 slint = { path = "../../crates/slint", features = ["mcp"] }

@@ -10,4 +10,10 @@ fn main() {
     for dependency in slint_build::compile_with_output_path(gallery, out, config).unwrap() {
         println!("cargo:rerun-if-changed={}", dependency.display());
     }
+    let tray = "../../reference/slint-1.19.0/examples/system-tray/system-tray.slint";
+    let out = std::path::Path::new(&std::env::var_os("OUT_DIR").unwrap()).join("tray.rs");
+    let config = slint_build::CompilerConfiguration::new();
+    for dependency in slint_build::compile_with_output_path(tray, out, config).unwrap() {
+        println!("cargo:rerun-if-changed={}", dependency.display());
+    }
 }
