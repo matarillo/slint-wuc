@@ -887,10 +887,17 @@ impl Win32WindowAdapter {
         })
     }
 
-    /// Whether the window keeps a GDI redirection surface: a top-level window that can have a
-    /// native menu bar.
+    /// Whether the window keeps a GDI redirection surface: a top-level window with a native
+    /// `MenuBar`, which GDI draws there. Without one, what the visuals leave transparent shows
+    /// what is behind the window, as upstream does for windows without a menu bar.
+    ///
+    /// The surface is decided when the window is created and can't change afterwards.
     fn has_redirection_surface(&self) -> bool {
-        self.popup.is_none() && !menu::disabled()
+        if let Some(hwnd) = self.hwnd.get() {
+            let ex_style = WINDOW_EX_STYLE(unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } as u32);
+            return !ex_style.contains(WS_EX_NOREDIRECTIONBITMAP);
+        }
+        self.popup.is_none() && !menu::disabled() && self.menu_bar.declared()
     }
 
     fn top_level_hwnd(&self) -> Option<HWND> {
@@ -1289,8 +1296,13 @@ impl WindowAdapterInternal for Win32WindowAdapter {
     }
 
     /// Detached windows have no native menus, as upstream's testing backend.
+    /// A window created without a menu bar has no surface for one: it gets upstream's Slint
+    /// `MenuBar` instead.
     fn supports_native_menu_bar(&self) -> bool {
-        !self.detached && self.popup.is_none() && !menu::disabled()
+        !self.detached
+            && self.popup.is_none()
+            && !menu::disabled()
+            && (self.hwnd.get().is_none() || self.has_redirection_surface())
     }
 
     fn setup_menubar(&self, menubar: vtable::VRc<crate::menus::MenuVTable>) {

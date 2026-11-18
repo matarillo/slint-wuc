@@ -194,6 +194,11 @@ impl MenuBar {
         }
     }
 
+    /// Whether the window has a `MenuBar`, even one that shows nothing yet.
+    pub(super) fn declared(&self) -> bool {
+        self.menu.borrow().is_some()
+    }
+
     pub(super) fn set(&self, adapter: &Win32WindowAdapter, menu: &VRc<MenuVTable>) {
         self.menu.replace(Some(VRc::downgrade(menu)));
         self.rebuild(adapter);

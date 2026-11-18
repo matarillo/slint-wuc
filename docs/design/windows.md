@@ -56,7 +56,12 @@ As upstream's winit backend does on Windows with `muda`:
   The menu runs a message loop of its own, so the host opens it from a posted message, once the click is handled.
 - Entries map to Win32 menu items as in `muda`: a check mark for a checkable entry, otherwise its icon as a 16×16 bitmap, and `MF_GRAYED` when disabled.
 - GDI draws the menu bar into the window's redirection surface, which `WS_EX_NOREDIRECTIONBITMAP` leaves out.
-  So a top-level window keeps it unless `SLINT_NO_MUDA` is set, and its composition target is topmost, over that surface.
+  So only a top-level window that has a `MenuBar` when it's created keeps the surface, unless `SLINT_NO_MUDA` is set, and its composition target is topmost, over that surface.
+  - The fork never paints the surface, so it shows white wherever the visuals are transparent: such a window can't show through or show Mica in its client area.
+    Upstream's winit backend has the same limit: it turns transparency off for a window with a native menu bar (#8793).
+  - Every other window has no surface, so what the visuals leave transparent shows what's behind it, or the system backdrop (Mica) when the application sets one.
+  - The extended style can't change once the window exists. A window created without a surface reports `supports_native_menu_bar()` false from then on, so a `MenuBar` that comes later is upstream's Slint-drawn one.
+  - Keeping the surface and calling `DwmEnableBlurBehindWindow` with an empty region, as winit does, didn't make it transparent, nor did a black class brush on top of that (2026-11-19). Why wasn't found.
 - Windows draws a menu bar light whatever the color scheme.
   When the scheme is dark, the host draws the bar on the undocumented `WM_UAHDRAWMENU` and `WM_UAHDRAWMENUITEM` messages, in `muda`'s colors.
 - `SLINT_NO_MUDA` turns both off, as upstream does, and the core draws the menus in popups instead.

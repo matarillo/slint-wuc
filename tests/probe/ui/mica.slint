@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Windows with a transparent background, for the system backdrop (Mica) that `probe-mica` sets.
+// The card is opaque, so that a capture can tell the backdrop from the window's own content.
+
+component Card inherits Rectangle {
+    in property <string> label;
+    x: 40px;
+    y: 40px;
+    width: 240px;
+    height: 120px;
+    background: #2060c0;
+    border-radius: 8px;
+    Text {
+        text: root.label;
+        color: white;
+        font-size: 16px;
+    }
+}
+
+export component MicaPlain inherits Window {
+    title: "Mica without a menu bar";
+    background: transparent;
+    preferred-width: 520px;
+    preferred-height: 380px;
+    Card { label: "no MenuBar"; }
+}
+
+export component MicaMenu inherits Window {
+    title: "Mica with a menu bar";
+    background: transparent;
+    preferred-width: 520px;
+    preferred-height: 380px;
+    MenuBar {
+        Menu {
+            title: "File";
+            MenuItem { title: "Quit"; }
+        }
+        Menu {
+            title: "Edit";
+            MenuItem { title: "Copy"; }
+        }
+    }
+    Card { label: "with MenuBar"; }
+}

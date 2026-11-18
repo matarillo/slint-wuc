@@ -51,6 +51,14 @@ name = "probe-tray"
 path = "src/tray.rs"
 
 [[bin]]
+name = "probe-titlebar"
+path = "src/titlebar.rs"
+
+[[bin]]
+name = "probe-mica"
+path = "src/mica.rs"
+
+[[bin]]
 name = "probe-perf"
 path = "src/perf.rs"
 
@@ -63,7 +71,8 @@ i-slint-core = { path = "../../crates/core" }
 i-slint-backend-testing = { path = "../../crates/testing", features = ["internal"] }
 image = { workspace = true }
 # For `probe-perf`: process memory, handle and GDI/USER object counts, and process times.
-windows = { workspace = true, features = ["Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+# For `probe-mica`: the system backdrop.
+windows = { workspace = true, features = ["Win32_Graphics_Dwm", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [build-dependencies]
 # The compiler is out of scope for this fork: the probe uses the published one, unmodified.
