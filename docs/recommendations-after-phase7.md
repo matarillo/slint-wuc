@@ -141,9 +141,79 @@ Mica、ダークモードへの追従、アクセント色、ネイティブメ�
 ほかに、カスタムカーソル画像が未対応です【確認】。既定の矢印になります。
 アイコンの作成処理を流用すれば S で済み、重要度は低〜中です。
 
+## フォーク独自の拡張の考え方
+
+判断事項の 1 を決めるための材料です。
+「`slint::windows` のような拡張」とは、上流が winit バックエンド向けに用意している拡張と同じ形で、このフォーク専用の Windows 向け拡張を Rust の facade に足すことです。
+
+### 上流の前例
+
+上流の `slint` クレートには、特定のバックエンド向けの拡張がいくつかあります【確認】。
+
+- `slint::winit_030` モジュール (feature は `unstable-winit-030`)
+  - `slint::Window` に、拡張トレイト `WinitWindowAccessor` が付きます。
+    - `with_winit_window`: 中の winit のウィンドウを触れます。
+    - `on_winit_window_event`: ウィンドウのイベントを横取りできます。
+  - `BackendSelector` にも、ウィンドウを作るときの属性に手を入れる `with_winit_window_attributes_hook` などがあります。
+  - ドキュメントには次の注意があります。
+    - マイナーリリースで変わりうる。
+    - Slint 自身が管理する状態 (カーソル、サイズ、IME など) は上書きされうる。
+- `slint::android` と `unstable-wgpu-*` も同じ考え方です。上流の公開 API でカバーしない部分を、名前に `unstable-` が付いた feature で個別に出しています。
+
+上流で Mica を使うときも、この拡張を通します。
+winit 0.30 の Windows 向け拡張に `set_system_backdrop(BackdropType::MainWindow)` があります【確認】。
+
+```rust
+use slint::winit_030::{WinitWindowAccessor, winit::platform::windows::{WindowExtWindows, BackdropType}};
+app.window().with_winit_window(|w| w.set_system_backdrop(BackdropType::MainWindow));
+```
+
+### フォークでの具体像 (案)
+
+```rust
+// Cargo.toml: slint = { ..., features = ["unstable-windows"] }
+use slint::windows::{WindowsWindowExt, Backdrop};
+
+app.window().set_system_backdrop(Backdrop::Mica);        // DWM の背景素材
+app.window().set_corner_preference(Corners::Round);      // 角、枠の色、タイトルバーの色
+app.window().on_window_message(|msg, wparam, lparam| …); // on_winit_window_event に当たるもの
+app.window().with_composition_root(|visual| …);          // 独自の Visual や D3D の面を差し込む
+```
+
+- 形は上流に合わせます。
+  - `unstable-` 付きの feature にします。
+  - `Window` への拡張トレイトにします。
+  - 「変わりうる」「Slint が管理する状態は上書きされうる」と明記します。
+- 中身はフォーク独自です。`winit_030` をまねることはできません。フォークには winit がないので、winit の型を返せないからです。
+
+### 上流との整合性
+
+| 観点 | 合うか |
+|---|---|
+| 拡張の出し方 (unstable feature、拡張トレイト、注意書き) | 合わせられる |
+| アプリのコード | 合わない。上流向けの `winit_030` のコードはフォークでビルドできず、フォーク向けの拡張のコードは上流でビルドできない。両方で動かすには `cfg` で分ける必要がある |
+| `.slint` 側 | 拡張できない。コンパイラーは上流のものを改造せずに使うので、`Window` に `backdrop: mica` のようなプロパティは足せない。拡張は Rust のコードからだけになる |
+| 将来の C++ や Node | 拡張ごとに、言語ごとの窓口が要る (上流の `winit_030` も Rust だけ) |
+
+raw window handle (推奨 1) は上流の公開 API そのものです。
+アプリが HWND を取って `DwmSetWindowAttribute` を自分で呼ぶコードは、上流の winit でも、このフォークでも、同じまま動きます。
+
+### 判断の目安
+
+- raw window handle だけにする場合
+  - 上流とのコードの互換が最も高く、コストも最小です。
+  - Mica、角、枠の色は、アプリが DWM を呼べば足ります。
+  - Mica がちゃんと透けるには、ホスト側の協力が要るかもしれません (ネイティブメニューバーの GDI 面など)【推測】。その場合も、要るのはホストの修正だけです。
+- `unstable-windows` の拡張を足す場合、HWND だけではできないことに意味があります。
+  - メッセージの横取り: アプリが自前でウィンドウをサブクラス化すると、ホストの処理とぶつかります。
+  - Composition のビジュアルツリーへの差し込み: WinUI 系の Visual、動画、D3D のスワップチェーンを、Slint の画面に混ぜられます。上流のどのバックエンドにもできないことで、このフォークならではの強みになります。
+
+おすすめは、まず raw window handle で Mica を見せることです。
+拡張は、Composition への差し込みのように HWND では足りない用途が出たときに足します。
+
 ## オーナーの判断が必要なこと
 
-1. フォーク独自の API をどこまで認めるか。facade だけに `slint::windows` のような拡張を足すか、HWND とサンプルにとどめるか。Mica、タイトルバー、ハイコントラストのすべてに関わる。
+1. フォーク独自の API をどこまで認めるか。facade だけに `slint::windows` のような拡張を足すか、HWND とサンプルにとどめるか。Mica、タイトルバー、ハイコントラストのすべてに関わる。考え方は「フォーク独自の拡張の考え方」を参照。
 2. 見せる相手は Rust の開発者だけか、C++ の開発者も含むか。
 3. 配布の形 (git の依存、別名での crates.io 公開、patch の手順だけ) とライセンスの表記。README の内容が決まる。
 4. 最低 OS をビルド 22000 のままにするか、22621 に上げるか。Mica の公開 API は 22621 以降。
