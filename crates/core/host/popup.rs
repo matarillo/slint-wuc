@@ -3,7 +3,8 @@
 //! Popup windows: `docs/design/windows.md`.
 
 use super::Win32WindowAdapter;
-use crate::api::{LogicalPosition, LogicalSize};
+use crate::api::{LogicalPosition, LogicalSize, PhysicalSize};
+use crate::graphics::{Rgba8Pixel, SharedPixelBuffer};
 use crate::item_tree::ItemRc;
 use crate::items::PopupClosePolicy;
 use crate::lengths::LogicalRect;
@@ -218,6 +219,59 @@ fn native_popups(adapter: &Win32WindowAdapter) -> Vec<Rc<Win32WindowAdapter>> {
             PopupWindowLocation::ChildWindow(_) => None,
         })
         .collect()
+}
+
+/// Draws the popups of `adapter` that have windows of their own over `snapshot` of its client
+/// area, where they are on the screen, margins included.
+pub(super) fn draw_popups(
+    adapter: &Win32WindowAdapter,
+    snapshot: &mut SharedPixelBuffer<Rgba8Pixel>,
+) {
+    let Some(hwnd) = adapter.hwnd.get() else { return };
+    let mut origin = POINT::default();
+    unsafe {
+        let _ = ClientToScreen(hwnd, &mut origin);
+    }
+    for popup in native_popups(adapter) {
+        let (Some(popup_hwnd), Some(p)) = (popup.hwnd.get(), &popup.popup) else { continue };
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(popup_hwnd, &mut rect) }.is_err() {
+            continue;
+        }
+        let margin = p.margin.get();
+        let size = popup.size.get();
+        let full = PhysicalSize::new(
+            size.width + (margin.left + margin.right) as u32,
+            size.height + (margin.top + margin.bottom) as u32,
+        );
+        match popup.capture(full) {
+            Ok(pixels) => blend(snapshot, &pixels, rect.left - origin.x, rect.top - origin.y),
+            Err(e) => crate::debug_log!("cannot capture a popup: {e}"),
+        }
+    }
+}
+
+/// Draws `top` over `bottom` with its top-left corner at `(x, y)`; both have straight alpha.
+fn blend(
+    bottom: &mut SharedPixelBuffer<Rgba8Pixel>,
+    top: &SharedPixelBuffer<Rgba8Pixel>,
+    x: i32,
+    y: i32,
+) {
+    let (width, height) = (bottom.width() as i32, bottom.height() as i32);
+    let top_width = top.width() as i32;
+    let bottom_pixels = bottom.make_mut_slice();
+    for (i, s) in top.as_slice().iter().enumerate() {
+        let (tx, ty) = (x + i as i32 % top_width, y + i as i32 / top_width);
+        if s.a == 0 || !(0..width).contains(&tx) || !(0..height).contains(&ty) {
+            continue;
+        }
+        let d = &mut bottom_pixels[(ty * width + tx) as usize];
+        let (sa, da) = (s.a as u32, d.a as u32 * (255 - s.a as u32) / 255);
+        let a = sa + da;
+        let mix = |s: u8, d: u8| ((s as u32 * sa + d as u32 * da + a / 2) / a) as u8;
+        *d = Rgba8Pixel { r: mix(s.r, d.r), g: mix(s.g, d.g), b: mix(s.b, d.b), a: a as u8 };
+    }
 }
 
 /// Closes the popups of `adapter` that close on a click outside them.

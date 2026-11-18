@@ -35,6 +35,8 @@ A popup then isn't cut off at the edge of its window, which a combo box near the
   - The core closes popups on clicks inside the application's windows, and on Escape.
   - The host also closes them when the application deactivates (`WM_ACTIVATEAPP`), on a press in the owner's non-client area, and when the owner moves or resizes.
     A popup with `close-policy: no-auto-close` stays, and moves with its owner.
+- `Window::take_snapshot` draws the popup windows, margins included, over the window's own pixels where they are on the screen.
+  Upstream's renderers draw popups inside the window, so its snapshots show them too.
 - Tests: a detached window creates popup windows only after `use_native_popup(true)`, as upstream's testing backend does.
   Those popup windows are detached too.
   Otherwise popups are drawn inside the window, which upstream's cases expect by default.
@@ -56,6 +58,12 @@ AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `acc
   The host ports it, replacing the winit event loop with the host's messages.
 - `WM_GETOBJECT` goes to the AccessKit adapter.
 - Each popup window exposes its own tree.
+
+## Scale Factor
+
+`SLINT_SCALE_FACTOR` sets every window's scale factor instead of its monitor's, as in upstream's winit backend.
+Logical sizes convert at that factor, and `WM_DPICHANGED` no longer changes it.
+The window frame keeps the monitor's DPI.
 
 ## Not Yet Decided
 

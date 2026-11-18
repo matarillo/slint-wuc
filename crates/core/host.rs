@@ -611,14 +611,31 @@ impl Win32WindowAdapter {
         self.renderer.tree.borrow().passes()
     }
 
-    /// Syncs the visuals and captures what the compositor draws for them.
+    /// Syncs the visuals and captures what the compositor draws for them, with the popups that
+    /// have windows of their own drawn over them, as upstream's renderers draw popups inside
+    /// the window.
     fn take_snapshot(&self) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
+        let mut snapshot = self.capture(self.size.get())?;
+        if self.popup.is_none() {
+            popup::draw_popups(self, &mut snapshot);
+        }
+        Ok(snapshot)
+    }
+
+    /// Syncs the visuals and captures `size` physical pixels of the client area.
+    fn capture(&self, size: PhysicalSize) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
         self.sync();
         let (compositor, root) = {
             let tree = self.renderer.tree.borrow();
             (tree.compositor().clone(), tree.root().clone())
         };
-        snapshot::capture(&compositor, &root, self.target.borrow().as_ref(), self.size.get())
+        snapshot::capture(&compositor, &root, self.target.borrow().as_ref(), size)
+    }
+
+    /// The window that gets the keys that arrive at this one: the topmost popup with a window
+    /// of its own that isn't a tooltip, or this window.
+    pub fn key_window(&self) -> Rc<dyn WindowAdapter> {
+        popup::key_window(self)
     }
 
     /// The visual the window shows: the parent of the item trees' visuals.
@@ -704,7 +721,8 @@ impl Win32WindowAdapter {
         target.SetRoot(renderer.tree.borrow().root()).map_err(err)?;
         *self.target.borrow_mut() = Some(target);
         self.offset_root();
-        let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
+        let scale = overriding_scale_factor()
+            .unwrap_or_else(|| unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0);
         self.scale_factor_changed(scale);
         // The window was created for the system DPI; a requested size applies again at the
         // window's own DPI.
@@ -845,6 +863,12 @@ impl Win32WindowAdapter {
         }
     }
 
+    /// The DPI that logical sizes convert at: the one `SLINT_SCALE_FACTOR` sets, or the
+    /// window's. Window frames keep the window's.
+    fn content_dpi(&self) -> u32 {
+        overriding_dpi().unwrap_or_else(|| self.dpi())
+    }
+
     /// The window rectangle size that keeps the intended logical size at `dpi`, unless the
     /// window is maximized or minimized.
     fn dpi_scaled_frame(&self, hwnd: HWND, dpi: u32) -> Option<(i32, i32)> {
@@ -852,7 +876,7 @@ impl Win32WindowAdapter {
         if unsafe { IsZoomed(hwnd).as_bool() || IsIconic(hwnd).as_bool() } {
             return None;
         }
-        Some(self.frame_size(hwnd, to_physical(logical, dpi), dpi))
+        Some(self.frame_size(hwnd, to_physical(logical, overriding_dpi().unwrap_or(dpi)), dpi))
     }
 
     /// The window rectangle size for a client of `client` physical pixels at `dpi`.
@@ -981,7 +1005,7 @@ impl WindowAdapter for Win32WindowAdapter {
         let size = match requested {
             WindowSize::Logical(logical) => {
                 self.logical_size.set(Some(logical));
-                to_physical(logical, self.dpi())
+                to_physical(logical, self.content_dpi())
             }
             WindowSize::Physical(physical) => {
                 self.logical_size.set(Some(physical.to_logical(self.window.scale_factor())));
@@ -1177,7 +1201,8 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             let client = PhysicalSize::new((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
             let size = adapter.content_size(client);
             // A size that the intended logical size doesn't explain comes from the user.
-            let intended = adapter.logical_size.get().map(|l| to_physical(l, adapter.dpi()));
+            let intended =
+                adapter.logical_size.get().map(|l| to_physical(l, adapter.content_dpi()));
             let from_user = !adapter.in_dpi_change.get() && intended != Some(size);
             if from_user {
                 adapter.logical_size.set(Some(size.to_logical(adapter.window.scale_factor())));
@@ -1220,7 +1245,9 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_DPICHANGED => {
             let dpi = (wp.0 & 0xffff) as u32;
             adapter.in_dpi_change.set(true);
-            adapter.scale_factor_changed(dpi as f32 / 96.0);
+            if overriding_scale_factor().is_none() {
+                adapter.scale_factor_changed(dpi as f32 / 96.0);
+            }
             // SAFETY: WM_DPICHANGED's lParam points to the suggested window rectangle.
             if let Some(r) = unsafe { (lp.0 as *const RECT).as_ref() } {
                 // The suggested rectangle has the size WM_GETDPISCALEDSIZE answered.
@@ -1256,15 +1283,15 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_GETMINMAXINFO => {
             let constraints = adapter.constraints.get();
-            let dpi = adapter.dpi();
+            let (dpi, content_dpi) = (adapter.dpi(), adapter.content_dpi());
             // SAFETY: WM_GETMINMAXINFO's lParam points to the MINMAXINFO to fill.
             let info = unsafe { &mut *(lp.0 as *mut MINMAXINFO) };
             if let Some(min) = constraints.min {
-                let (w, h) = adapter.frame_size(hwnd, to_physical(min, dpi), dpi);
+                let (w, h) = adapter.frame_size(hwnd, to_physical(min, content_dpi), dpi);
                 info.ptMinTrackSize = POINT { x: w, y: h };
             }
             if let Some(max) = constraints.max {
-                let (w, h) = adapter.frame_size(hwnd, to_physical(max, dpi), dpi);
+                let (w, h) = adapter.frame_size(hwnd, to_physical(max, content_dpi), dpi);
                 info.ptMaxTrackSize = POINT { x: w, y: h };
             }
             LRESULT(0)
@@ -1285,7 +1312,23 @@ fn trace_dpi(args: core::fmt::Arguments) {
     }
 }
 
-/// `size` in physical pixels at `dpi`, rounded to the nearest pixel.
+/// The scale factor that `SLINT_SCALE_FACTOR` sets for every window instead of its monitor's,
+/// as upstream's winit backend reads it.
+fn overriding_scale_factor() -> Option<f32> {
+    static OVERRIDE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *OVERRIDE.get_or_init(|| {
+        std::env::var("SLINT_SCALE_FACTOR")
+            .ok()
+            .and_then(|x| x.parse::<f32>().ok())
+            .filter(|f| *f > 0.)
+    })
+}
+
+/// The DPI that [`overriding_scale_factor`] stands for.
+fn overriding_dpi() -> Option<u32> {
+    overriding_scale_factor().map(|f| (f * 96.0).round() as u32)
+}
+
 /// The layout's preferred size; an axis the layout has no preference for keeps `current`.
 fn preferred_or(
     constraints: crate::window::LayoutConstraints,
@@ -1308,6 +1351,7 @@ fn clamp_to(constraints: crate::window::LayoutConstraints, mut size: LogicalSize
     size
 }
 
+/// `size` in physical pixels at `dpi`, rounded to the nearest pixel.
 fn to_physical(size: LogicalSize, dpi: u32) -> PhysicalSize {
     let scale = dpi as f64 / 96.0;
     let px = |v: f32| (v as f64 * scale).round().clamp(0.0, (i32::MAX / 2) as f64) as u32;
