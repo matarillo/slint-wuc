@@ -226,6 +226,19 @@ Capturing needs a desktop session with DWM.
   Never use `InsertAtTop`: it's linear per call (S2).
 - Reordering (`z` changes) removes and reinserts the moved visuals.
 
+### Releasing Nodes
+
+- Nodes go newest first, in the order of `Node::serial`: Composition releases objects oldest first in quadratic time.
+  Removing 2000 text rows took 6.3 s oldest first and takes 37 ms newest first; 8000 rows take 149 ms.
+  Releasing an old object while many newer ones live is slow as well, so anything that holds released visuals longer has to keep that order.
+- Known limitation: when hundreds of text surfaces are drawn and dropped with no commit in between, the compositor's graphics device keeps the atlas pages they took.
+  That takes two sync passes in one dispatcher callback, which only `sync_now` (tests, snapshots) does.
+  Each page is a texture with two render target views and two shader resource views, a `DxgkCompositionObject` and a `Section` handle, and a few MB of GPU memory; 1000 rows keep about 1.5 pages per cycle.
+  `Close()`, reusing the surfaces, `ID2D1Device::ClearResources` and `Trim` don't free them; showing a popup or hiding another window sometimes does.
+  Holding the released nodes until a commit has completed avoids it.
+- Rows created and removed in separate frames level off: 400 cycles of 1000 text rows left 4 objects.
+  `probe-perf` measures both.
+
 ### Coordinates
 
 - Item geometry is relative to the parent item, in logical pixels.
@@ -256,5 +269,6 @@ Capturing needs a desktop session with DWM.
 
 - Whether to share one brush per color across the window (S2 measured the memory difference).
 - How images and paths, which also draw into surfaces, follow the text design; settled with S5.
+- Whether long lists that aren't virtualized and change their texts every frame keep atlas pages too (deferred from Phase 7, see [Releasing Nodes](#releasing-nodes)).
 - `WindowInner::set_component` on a shown window keeps the old component alive until the window is hidden, as upstream does.
   Generated code only sets the component before showing.
