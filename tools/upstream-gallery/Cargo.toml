@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Upstream's widget gallery on upstream Slint 1.19.0 from crates.io, with its MCP server, for
+# comparing the fork with upstream. It's a workspace of its own: upstream's crates have the
+# fork's names.
+
+[package]
+name = "upstream-gallery"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "upstream-gallery"
+path = "../../tests/probe/src/gallery.rs"
+
+[dependencies]
+slint = { version = "=1.19.0", features = ["mcp"] }
+
+[build-dependencies]
+slint-build = "=1.19.0"
+
+[workspace]

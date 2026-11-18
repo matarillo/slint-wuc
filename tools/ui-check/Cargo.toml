@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+name = "ui-check"
+description = "Runs UI scenarios on upstream's and the fork's gallery through their MCP servers and compares screenshots"
+authors.workspace = true
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+rust-version.workspace = true
+version = "0.0.0"
+
+[dependencies]
+base64 = "0.22"
+image = { workspace = true }
+serde_json = { workspace = true }
