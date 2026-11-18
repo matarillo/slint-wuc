@@ -49,7 +49,7 @@ fn soft_if(soft: bool) -> CompositionBorderMode {
 
 /// Per-item handle into the window's [`VisualTree`]. Every item struct embeds one.
 ///
-/// Its layout is part of the C++ ABI: `api/cpp/cbindgen.rs` declares it by hand.
+/// Its layout is part of the C ABI that `tools/cpp-headers` generates the C++ headers of.
 #[derive(Default, Debug)]
 #[repr(C)]
 pub struct CachedRenderingData {
