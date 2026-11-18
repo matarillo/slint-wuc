@@ -3,11 +3,13 @@
 //! Native menus, as upstream's winit backend shows them on Windows through `muda`: a `MenuBar`
 //! is the window's Win32 menu bar, and a `ContextMenu` opens a Win32 popup menu.
 
+mod dark_bar;
+
 use super::Win32WindowAdapter;
 use crate::SharedVector;
 use crate::api::LogicalPosition;
 use crate::graphics::Image;
-use crate::items::MenuEntry;
+use crate::items::{ColorScheme, MenuEntry};
 use crate::menus::MenuVTable;
 use crate::properties::{PropertyDirtyHandler, PropertyTracker};
 use alloc::rc::Weak;
@@ -21,10 +23,11 @@ use windows::Win32::Graphics::Gdi::{
     DeleteObject, HBITMAP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreateMenu, CreatePopupMenu, DestroyMenu, DrawMenuBar, GetMenuItemCount, HMENU,
-    MENUITEMINFOW, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR, MF_STRING, MF_UNCHECKED,
-    MIIM_BITMAP, PostMessageW, SetForegroundWindow, SetMenu, SetMenuItemInfoW, TPM_LEFTALIGN,
-    TPM_RETURNCMD, TrackPopupMenuEx, WM_COMMAND, WM_DESTROY, WM_ENTERMENULOOP, WM_EXITMENULOOP,
+    AppendMenuW, CreateMenu, CreatePopupMenu, DefWindowProcW, DestroyMenu, DrawMenuBar,
+    GetMenuItemCount, HMENU, MENUITEMINFOW, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR,
+    MF_STRING, MF_UNCHECKED, MIIM_BITMAP, PostMessageW, SetForegroundWindow, SetMenu,
+    SetMenuItemInfoW, TPM_LEFTALIGN, TPM_RETURNCMD, TrackPopupMenuEx, WM_COMMAND, WM_DESTROY,
+    WM_ENTERMENULOOP, WM_EXITMENULOOP, WM_NCACTIVATE, WM_NCPAINT,
 };
 use windows::core::{HSTRING, PCWSTR};
 
@@ -302,7 +305,14 @@ impl MenuBar {
         }
     }
 
-    /// Handles the messages of the menu bar: its commands, and when it opens and closes.
+    /// Whether the window has a native menu bar and the system's color scheme is dark.
+    fn drawn_dark(&self, adapter: &Win32WindowAdapter) -> bool {
+        self.native.borrow().is_some()
+            && adapter.inner().context().color_scheme(None) == ColorScheme::Dark
+    }
+
+    /// Handles the messages of the menu bar: its commands, when it opens and closes, and how
+    /// it is drawn dark.
     pub(super) fn handle(
         &self,
         adapter: &Win32WindowAdapter,
@@ -330,6 +340,16 @@ impl MenuBar {
                     self.rebuild(adapter);
                 }
                 None
+            }
+            dark_bar::WM_UAHDRAWMENU | dark_bar::WM_UAHDRAWMENUITEM if self.drawn_dark(adapter) => {
+                dark_bar::draw(hwnd, msg, wp, lp);
+                Some(LRESULT(0))
+            }
+            // The default procedure draws first; the dark bar goes over it.
+            WM_NCACTIVATE | WM_NCPAINT if self.drawn_dark(adapter) => {
+                let result = unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+                dark_bar::draw(hwnd, msg, wp, lp);
+                Some(result)
             }
             // `DestroyWindow` destroys the window's menu.
             WM_DESTROY => {

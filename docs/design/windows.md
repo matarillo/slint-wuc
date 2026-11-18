@@ -55,6 +55,8 @@ As upstream's winit backend does on Windows with `muda`:
   The core asks for it while it handles the right click.
   The menu runs a message loop of its own, so the host opens it from a posted message, once the click is handled.
 - Entries map to Win32 menu items as in `muda`: a check mark for a checkable entry, otherwise its icon as a 16×16 bitmap, and `MF_GRAYED` when disabled.
+- Windows draws a menu bar light whatever the color scheme.
+  When the scheme is dark, the host draws the bar on the undocumented `WM_UAHDRAWMENU` and `WM_UAHDRAWMENUITEM` messages, in `muda`'s colors.
 - `SLINT_NO_MUDA` turns both off, as upstream does, and the core draws the menus in popups instead.
 - A detached window has no native menus, as upstream's testing backend.
 
