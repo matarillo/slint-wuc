@@ -190,6 +190,30 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
   - 将来のバインディングのギャップ一覧は `docs/design/bindings-gap.md`。
   - 持ち越し: マルチモニター DPI の検証 (Phase 1 から持ち越したモニター間ドラッグの手動確認を含む。モニターがないため)。仮想化しない長いリストで毎フレームテキストが変わる場合に、アトラスのページが残るかの検証。16384 px を超えるテキスト (仮想サーフェス) の判断。
 
+## Phase 7 の後に持ち越したこと
+
+### オーナーが Phase 7 の後に別途計画するもの
+- フォーク上での自作アプリ (slokk-slint) の確認。フェーズ中の確認対象にはしない (Phase 6 で決定)。
+- IMM32 から TSF への移行。IME の窓口は `crates/core/host/ime.rs` に閉じてあり、フォーカス移動時の扱いは TSF に合わせてある (`docs/design/input.md`)。再変換 (`IMR_RECONVERTSTRING`) も TSF 移行時に扱う。
+- Mica などの Windows 固有の機能。上流に API がないため、方式の確認だけ済ませてある (Phase 5)。
+- OLE によるアプリ間のドラッグ&ドロップ (`start_drag`、`IDropTarget`)。上流の winit にもない (Phase 6 で決定)。
+
+### 検証の持ち越し
+- マルチモニター DPI。倍率の異なるモニター間のドラッグ (Phase 1 から) を含む。モニターがないため (`SLINT_FORK_TRACE_DPI` でメッセージを追える)。
+- 仮想化しない長いリストで毎フレームテキストが変わる場合に、アトラスのページが残るか (Phase 7、`docs/design/visual-tree.md`)。
+
+### 未実装・判断待ち
+- 16384 px を超えるテキスト (仮想サーフェス)。今は切れる (Phase 4 から)。
+- キー入力を受けるポップアップ (コンボボックスの一覧など) が、フォーカスを UI Automation に伝えること (Phase 6)。
+- コミット前に描いて壊したテキストのアトラスのページ。対策の候補は、解放をコミットの完了まで遅らせること (Phase 7)。
+- 将来の最適化: Slint のアニメーションの Composition アニメーションへの委譲。走査が 1 ms を超えるようなら dirty キュー方式に切り替える。ブラシを色ごとに共有するか。
+- 言語バインディング (インタープリター、C++、Node、Python) の移植。順序と不足は `docs/design/bindings-gap.md`。除外中の 13 件はここに含まれる。
+
+### 対象外とし、条件がそろえば見直すもの
+- parley の DirectWrite への置き換え。アプリの挙動に不備が出たら検討する (Phase 4)。
+- タッチパッドのピンチと回転。上流の winit が Windows で送らないため (Phase 3)。
+- `Native*` item (Qt スタイル)、C++ から独自のプラットフォームを与える `slint-platform.h`、ビットマップフォント、`set_rendering_notifier`。
+
 ## 検証方法 (全体)
 
 - `cargo test --workspace`: 上流から引き継ぐコアの単体テスト、item! 適合テスト、ツリーダンプのスナップショットテスト。
