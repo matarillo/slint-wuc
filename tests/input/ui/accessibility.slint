@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+// Accessible items, for a UI Automation client: a text, a button and a checkbox.
+export component AccessibilityTest inherits Window {
+    width: 200px;
+    height: 100px;
+    title: "Accessible";
+    in-out property <int> clicks;
+    in-out property <bool> checked;
+
+    Text {
+        x: 0;
+        y: 0;
+        text: "Hello";
+    }
+
+    Rectangle {
+        x: 0;
+        y: 30px;
+        width: 80px;
+        height: 30px;
+        accessible-role: button;
+        accessible-label: "Press";
+        accessible-action-default => {
+            root.clicks += 1;
+        }
+    }
+
+    Rectangle {
+        x: 100px;
+        y: 30px;
+        width: 80px;
+        height: 30px;
+        accessible-role: checkbox;
+        accessible-label: "Check";
+        accessible-checkable: true;
+        accessible-checked: root.checked;
+    }
+}

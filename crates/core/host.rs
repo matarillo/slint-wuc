@@ -49,6 +49,8 @@ use windows::Win32::UI::HiDpi::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{HSTRING, Interface, w};
 
+#[cfg(feature = "accessibility")]
+mod accesskit;
 mod ime;
 mod input;
 mod keyboard;
@@ -526,6 +528,8 @@ pub struct Win32WindowAdapter {
     dark_title_bar: Cell<Option<bool>>,
     menu_bar: menu::MenuBar,
     context_menu: RefCell<Option<menu::PendingContextMenu>>,
+    #[cfg(feature = "accessibility")]
+    accesskit: core::cell::OnceCell<accesskit::AccessKit>,
 }
 
 impl Win32WindowAdapter {
@@ -590,6 +594,8 @@ impl Win32WindowAdapter {
             dark_title_bar: Cell::new(None),
             menu_bar: menu::MenuBar::new(weak.clone()),
             context_menu: Default::default(),
+            #[cfg(feature = "accessibility")]
+            accesskit: Default::default(),
         }))
     }
 
@@ -732,6 +738,9 @@ impl Win32WindowAdapter {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, Weak::into_raw(self.self_weak.clone()) as isize)
         };
         self.hwnd.set(Some(hwnd));
+        // Before the window handles `WM_GETOBJECT`, which needs UI Automation initialized.
+        #[cfg(feature = "accessibility")]
+        let _ = self.accesskit.set(accesskit::AccessKit::new(self.self_weak.clone(), hwnd));
         ime::window_created(hwnd);
         theme::apply(&self.window, hwnd, &self.dark_title_bar);
         let renderer = &self.renderer;
@@ -834,6 +843,23 @@ impl Win32WindowAdapter {
     }
 
     /// The HWND of the window that isn't a popup, this one or the one its popups belong to.
+    /// Whether the keys go to this window: the window has the keyboard focus, or it's the popup
+    /// that gets the keys of its owner.
+    #[cfg(feature = "accessibility")]
+    fn has_keyboard_focus(&self) -> bool {
+        let Some(top_level) = self.top_level_hwnd() else { return false };
+        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetFocus() } != top_level {
+            return false;
+        }
+        let key_window = match &self.popup {
+            Some(popup) => popup.parent.upgrade().map(|parent| parent.key_window()),
+            None => Some(self.key_window()),
+        };
+        key_window.is_some_and(|key_window| {
+            core::ptr::addr_eq(Rc::as_ptr(&key_window), self as *const Self)
+        })
+    }
+
     fn top_level_hwnd(&self) -> Option<HWND> {
         match &self.popup {
             Some(popup) => popup.parent.upgrade()?.top_level_hwnd(),
@@ -1202,6 +1228,35 @@ impl WindowAdapterInternal for Win32WindowAdapter {
             && !menu::disabled()
             && menu::request_context_menu(self, context_menu_item, position)
     }
+
+    #[cfg(feature = "accessibility")]
+    fn handle_focus_change(
+        &self,
+        _old: Option<crate::items::ItemRc>,
+        _new: Option<crate::items::ItemRc>,
+    ) {
+        if let Some(accesskit) = self.accesskit.get() {
+            accesskit.handle_focus_item_change();
+        }
+    }
+
+    #[cfg(feature = "accessibility")]
+    fn register_item_tree(&self, _: crate::item_tree::ItemTreeRefPin) {
+        if let Some(accesskit) = self.accesskit.get() {
+            accesskit.reload_tree();
+        }
+    }
+
+    #[cfg(feature = "accessibility")]
+    fn unregister_item_tree(
+        &self,
+        component: crate::item_tree::ItemTreeRef,
+        _: &mut dyn Iterator<Item = core::pin::Pin<crate::items::ItemRef<'_>>>,
+    ) {
+        if let Some(accesskit) = self.accesskit.get() {
+            accesskit.unregister_item_tree(component);
+        }
+    }
 }
 
 impl Drop for Win32WindowAdapter {
@@ -1230,6 +1285,16 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let Some(adapter) = weak.upgrade() else {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
     };
+    #[cfg(feature = "accessibility")]
+    if let Some(accesskit) = adapter.accesskit.get() {
+        if msg == accesskit::WM_APP_ACCESSKIT {
+            accesskit.handle_app_message(&adapter.window, wp);
+            return LRESULT(0);
+        }
+        if let Some(result) = accesskit.handle(msg, wp, lp) {
+            return result;
+        }
+    }
     match &adapter.popup {
         Some(popup) => {
             if let Some(result) = popup::handle(&adapter, popup, hwnd, msg, lp) {

@@ -79,6 +79,9 @@ shared-parley = ["shared-fontique", "dep:parley", "dep:skrifa", "dep:icu_normali
 
 accessibility-text = ["std", "shared-parley", "dep:accesskit"]
 
+# Exposes the windows' items to UI Automation through AccessKit, as upstream's winit backend.
+accessibility = ["accessibility-text", "dep:accesskit_windows"]
+
 shared-swash = ["dep:swash"]
 
 [dependencies]
@@ -118,6 +121,7 @@ unicode-script = { version = "0.5.7", optional = true }
 icu_normalizer = { workspace = true, optional = true }
 sys-locale = { version = "0.3.2" }
 accesskit = { version = "0.25", optional = true }
+accesskit_windows = { version = "0.35.2", optional = true }
 
 image = { workspace = true, optional = true, default-features = false }
 clru = { workspace = true, optional = true }
@@ -175,11 +179,11 @@ windows = { workspace = true, features = [
     "Win32_System_WinRT_Direct3D11",
     "Win32_System_WinRT_Graphics_Direct2D",
     "Win32_UI_Accessibility",
+    "Win32_UI_Controls",
     "Win32_UI_HiDpi",
     "Win32_UI_Input_Ime",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Input_Pointer",
-    "Win32_UI_Controls",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }

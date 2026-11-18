@@ -65,9 +65,20 @@ As upstream's winit backend does on Windows with `muda`:
 AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `accesskit_winit`.
 
 - Upstream's `internal/backends/winit/accesskit.rs` builds the AccessKit tree from the item tree.
-  The host ports it, replacing the winit event loop with the host's messages.
-- `WM_GETOBJECT` goes to the AccessKit adapter.
+  The host ports it (`host/accesskit.rs`), replacing winit's events with messages posted to the window.
+- The window creates its `accesskit_windows::Adapter` with the HWND, before it handles any `WM_GETOBJECT`.
+  The window procedure hands `WM_GETOBJECT` to it.
+  It follows the keyboard focus on `WM_SETFOCUS` and `WM_KILLFOCUS`, and while a menu is open or the window moves, as `accesskit_windows`'s subclassing adapter does.
+- That adapter is kept apart from the state that builds the tree.
+  Raising the events of an update can send `WM_GETOBJECT` while the state is borrowed.
+- UI Automation first gets a placeholder.
+  The window builds the tree once it handles a posted message, as upstream builds it on a winit event.
+- UI Automation asks for actions on threads of its own.
+  The requests go through a channel, and a posted message has the window run them.
 - Each popup window exposes its own tree.
+  The tree's bounds take the popup's margin into account.
+- The facade's `accessibility` feature, on by default as upstream, turns this on.
+- Not yet done: a popup with the keys of its owner, such as a combo box's list, doesn't tell UI Automation that it has the focus.
 
 ## System Settings
 
