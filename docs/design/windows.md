@@ -99,7 +99,9 @@ AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `acc
   The host works this out again for the top-level window and all its popups when the top-level window gains or loses the focus, when a menu loop or a move starts or ends, and once the core is done showing or closing a popup.
   Before telling a window that it's focused, the host names its focus item in its tree, so that the focus event lands on the item.
   - A UI Automation client hears the focus move into the popup and back (`tests/input`), even when no client asked for the popup's tree before it opened. AccessKit raises the event when it replaces the placeholder with the first tree. What asks for that tree isn't known; presumably UI Automation, once the popup is shown.
-  - Not checked: whether Narrator reads it, and what `IUIAutomation::GetFocusedElement` returns while the popup is open. The window in the test isn't in the foreground, so the call returns the focus of another application.
+  - Narrator reads it (checked by hand on 2026-11-19 with the gallery's combo box): "region" when the list opens, and the combo box again when it closes.
+    It reads nothing on the arrow keys in the list: Fluent's combo box keeps the focus on a `FocusScope` without a role, so it shows on the list's root, and the keys only change `current-index`. Not yet compared with upstream.
+  - Not checked: what `IUIAutomation::GetFocusedElement` returns while the popup is open. The window in the test isn't in the foreground, so the call returns the focus of another application.
 
 ## Window Properties
 

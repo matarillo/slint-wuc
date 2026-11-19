@@ -201,7 +201,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 ### 検証の持ち越し
 - マルチモニター DPI。倍率の異なるモニター間のドラッグ (Phase 1 から) と、同じモニターでの倍率の変更は、2026-11-19 に別のマシンで確かめた (論理サイズが保たれる。`docs/recommendations-after-phase7.md` の「5. マルチモニター DPI」)。IME とポップアップ (コンボボックスの一覧、ツールチップ、`PopupWindow`、ネイティブのコンテキストメニュー) も同じ日に確かめた。倍率の変化のあとにメニューバーの下の線が黒くなる問題 (上流でも出る) は直し、確かめた。
 - 仮想化しない長いリストで毎フレームテキストが変わる場合に、アトラスのページが残るか (Phase 7、`docs/design/visual-tree.md`)。
-- キー入力を受けるポップアップ (コンボボックスの一覧など) のフォーカスを、ナレーターが読むか。UI Automation に伝えることは 2026-11-19 に実装し、UI Automation クライアントのテストで確かめた (`docs/design/windows.md` の Accessibility、`docs/recommendations-after-phase7.md` の「7.」)。
+- コンボボックスの一覧の中で ↑↓ を押したとき、ナレーターが何も読まないこと。上流でも同じかを比べていない。キー入力を受けるポップアップのフォーカスを UI Automation に伝えることは、2026-11-19 に実装した。UI Automation クライアントのテストと、ナレーター (開くと「領域」、閉じると元のコンボボックスを読む) で確かめた (`docs/design/windows.md` の Accessibility、`docs/recommendations-after-phase7.md` の「7.」)。
 
 ### 未実装・判断待ち
 - 16384 px を超えるテキスト (仮想サーフェス)。今は切れる (Phase 4 から)。
