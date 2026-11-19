@@ -99,9 +99,12 @@ AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `acc
   The host works this out again for the top-level window and all its popups when the top-level window gains or loses the focus, when a menu loop or a move starts or ends, and once the core is done showing or closing a popup.
   Before telling a window that it's focused, the host names its focus item in its tree, so that the focus event lands on the item.
   - A UI Automation client hears the focus move into the popup and back (`tests/input`), even when no client asked for the popup's tree before it opened. AccessKit raises the event when it replaces the placeholder with the first tree. What asks for that tree isn't known; presumably UI Automation, once the popup is shown.
-  - Narrator reads it (checked by hand on 2026-11-19 with the gallery's combo box): "region" when the list opens, and the combo box again when it closes.
-    It reads nothing on the arrow keys in the list: Fluent's combo box keeps the focus on a `FocusScope` without a role, so it shows on the list's root, and the keys only change `current-index`. Upstream reads each item there.
-    The fork's popup raises the selection events too (`tests/input`); Narrator seems to ignore them because they come from a window that doesn't have the keyboard focus.
+  - When the focus falls on the root of a popup's tree, and nothing names a descendant to delegate it to, the focus goes to the first selected list item below the root.
+    Fluent's combo box keeps the focus on a `FocusScope` without a role, so it shows on the list's root, and the arrow keys only change `current-index` and the items' selection.
+    Upstream, where the list is in the window's tree under the combo box, Narrator reads the selection; the fork's popup raises the same selection events (`tests/input`), but Narrator reads nothing, presumably because they come from a window that doesn't have the keyboard focus.
+    Making the popup's root a list box, so that the items have a selection container as upstream's do, doesn't make Narrator read them either (checked by hand on 2026-11-20).
+    With the focus on the selected item, Narrator reads the selected item when the list opens, each item on the arrow keys, and the combo box again when the list closes (checked by hand on 2026-11-20 with the gallery's combo box); a UI Automation client hears those focus events (`tests/input`).
+  - `SLINT_FORK_TRACE_A11Y` prints when UI Automation asks a window for its tree and when AccessKit raises events, with the time.
   - Not checked: what `IUIAutomation::GetFocusedElement` returns while the popup is open. The window in the test isn't in the foreground, so the call returns the focus of another application.
 
 ## Window Properties

@@ -222,27 +222,6 @@ fn trace(args: core::fmt::Arguments) {
     }
 }
 
-/// How the tree of a popup window stands in for the combo box that upstream puts its list
-/// under, which `SLINT_FORK_A11Y_POPUP` picks while the owner compares them with Narrator:
-/// `list` makes the popup's root a list box, `selected` hands the focus that falls on the
-/// popup's root to its selected item, and `both` does both.
-#[derive(Clone, Copy)]
-struct PopupVariant {
-    list_root: bool,
-    focus_selected: bool,
-}
-
-fn popup_variant() -> PopupVariant {
-    static VARIANT: std::sync::OnceLock<PopupVariant> = std::sync::OnceLock::new();
-    *VARIANT.get_or_init(|| {
-        let value = std::env::var("SLINT_FORK_A11Y_POPUP").unwrap_or_default();
-        PopupVariant {
-            list_root: matches!(&*value, "list" | "both"),
-            focus_selected: matches!(&*value, "selected" | "both"),
-        }
-    })
-}
-
 /// Asks the window for the tree, which it builds once it handles the posted message, as
 /// upstream's winit backend does.
 struct ActivationHandler {
@@ -367,7 +346,6 @@ impl AccessKitAdapter {
                 next_component_id: 1,
                 free_component_ids: Default::default(),
                 root_node_id: NodeId(0),
-                list_root: None,
                 components_by_id: Default::default(),
                 component_ids: Default::default(),
                 all_nodes: Default::default(),
@@ -545,7 +523,6 @@ impl AccessKitAdapter {
                                     scale_factor,
                                     window_position,
                                 );
-                                self.nodes.make_list_root(cached_node.id, &mut node);
                                 node.set_children(cached_node.children.clone());
 
                                 let mut emitted: Vec<(NodeId, Node)> = Vec::new();
@@ -625,13 +602,14 @@ fn decode_sub_node_id(id: NodeId) -> Option<(NodeId, u32)> {
     (sub_index != 0).then_some((NodeId(id.0 & NODE_ID_PARENT_MASK), sub_index))
 }
 
-/// The first accessible item below `item` that is selected, under [`PopupVariant`].
-fn selected_descendant(item: &ItemRc) -> Option<ItemRc> {
+/// The first list item below `item` that is selected.
+fn selected_list_item(item: &ItemRc) -> Option<ItemRc> {
     crate::accessibility::accessible_descendents(item).find_map(|child| {
-        let selected = child
-            .accessible_string_property(AccessibleStringProperty::ItemSelected)
-            .is_some_and(|x| x == "true");
-        if selected { Some(child) } else { selected_descendant(&child) }
+        let selected = child.accessible_role() == crate::items::AccessibleRole::ListItem
+            && child
+                .accessible_string_property(AccessibleStringProperty::ItemSelected)
+                .is_some_and(|x| x == "true");
+        if selected { Some(child) } else { selected_list_item(&child) }
     })
 }
 
@@ -657,8 +635,6 @@ struct NodeCollection {
     component_ids: HashMap<NonNull<u8>, u32>,
     all_nodes: Vec<CachedNode>,
     root_node_id: NodeId,
-    /// The root of a popup window's tree, which [`PopupVariant`] makes a list box.
-    list_root: Option<NodeId>,
     focused_node_tracker: Pin<Box<PropertyTracker<false, DelegateFocusPropertyTracker>>>,
     /// Emission state, keyed by the inner `TextInput`'s `ItemRc`. Its per-entry property tracker
     /// stays empty on purpose: the state has to outlive the edits it describes, so that NodeIds
@@ -681,6 +657,9 @@ impl NodeCollection {
                     .upgrade()
                     .map(|focus_item| {
                         let parent = nearest_accessible_item(focus_item);
+                        // The list of upstream's combo box keeps the focus on the popup's root,
+                        // and tells its selection only. Narrator doesn't read the selection of a
+                        // popup window, which isn't focused, so the focus follows the selection.
                         let popup_root = window_adapter.popup.is_some()
                             && parent
                                 .parent_item(
@@ -696,9 +675,7 @@ impl NodeCollection {
                                             .nth(position)
                                     })
                                     .or_else(|| {
-                                        (popup_root && popup_variant().focus_selected)
-                                            .then(|| selected_descendant(&parent))
-                                            .flatten()
+                                        popup_root.then(|| selected_list_item(&parent)).flatten()
                                     })
                             })
                             .unwrap_or(parent)
@@ -825,7 +802,6 @@ impl NodeCollection {
             let mut text_run_nodes: Vec<(NodeId, Node)> = Vec::new();
             let node = tracker.as_ref().evaluate(|| {
                 let mut n = self.build_node_without_children(&item, scale_factor, window_position);
-                self.make_list_root(id, &mut n);
                 n.set_children(descendant_children.clone());
                 self.try_emit_text_input_accessibility(
                     &item,
@@ -900,13 +876,6 @@ impl NodeCollection {
         }
     }
 
-    /// Makes the root of a popup window's tree a list box, under `SLINT_FORK_A11Y_POPUP`.
-    fn make_list_root(&self, id: NodeId, node: &mut Node) {
-        if self.list_root == Some(id) {
-            node.set_role(Role::ListBox);
-        }
-    }
-
     fn tree_info(&self, root: NodeId) -> TreeInfo {
         let mut tree = TreeInfo::new(root);
         tree.toolkit_name = Some("Slint".into());
@@ -940,8 +909,6 @@ impl NodeCollection {
             };
         };
         let root_item = ItemRc::new_root(component);
-        self.list_root = (window_adapter.popup.is_some() && popup_variant().list_root)
-            .then(|| self.encode_item_node_id(&root_item));
 
         let popups = window_inner
             .active_popups()
