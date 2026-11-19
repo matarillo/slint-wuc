@@ -6,7 +6,6 @@
 name = "i-slint-core"
 description = "Internal Slint Runtime Library."
 authors.workspace = true
-documentation.workspace = true
 edition = "2024"
 homepage.workspace = true
 keywords = ["gui", "ui", "runtime"]
