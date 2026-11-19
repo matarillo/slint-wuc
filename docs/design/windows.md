@@ -94,7 +94,12 @@ AccessKit, as upstream's winit backend, with `accesskit_windows` instead of `acc
 - Each popup window exposes its own tree.
   The tree's bounds take the popup's margin into account.
 - The facade's `accessibility` feature, on by default as upstream, turns this on.
-- Not yet done: a popup with the keys of its owner, such as a combo box's list, doesn't tell UI Automation that it has the focus.
+- A popup that gets the keys of its owner, such as a combo box's list, has the focus for UI Automation, and its owner doesn't.
+  Windows never gives the popup the keyboard focus, so the host tells each window's AccessKit adapter whether its window is focused: the top-level window has the keyboard focus, no menu is open, it doesn't move or resize, and the keys go to that window.
+  The host works this out again for the top-level window and all its popups when the top-level window gains or loses the focus, when a menu loop or a move starts or ends, and once the core is done showing or closing a popup.
+  Before telling a window that it's focused, the host names its focus item in its tree, so that the focus event lands on the item.
+  - A UI Automation client hears the focus move into the popup and back (`tests/input`), even when no client asked for the popup's tree before it opened. AccessKit raises the event when it replaces the placeholder with the first tree. What asks for that tree isn't known; presumably UI Automation, once the popup is shown.
+  - Not checked: whether Narrator reads it, and what `IUIAutomation::GetFocusedElement` returns while the popup is open. The window in the test isn't in the foreground, so the call returns the focus of another application.
 
 ## Window Properties
 

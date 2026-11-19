@@ -23,6 +23,8 @@ windows = { workspace = true, features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+# For `#[implement]`, which names the crate.
+windows-core = "0.62"
 
 [build-dependencies]
 slint-build = "=1.19.0"

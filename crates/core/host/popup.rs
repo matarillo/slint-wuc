@@ -214,7 +214,7 @@ pub(super) fn handle_owner(adapter: &Win32WindowAdapter, msg: u32, wp: WPARAM) {
 }
 
 /// The adapters of the popups of `adapter` that have windows of their own.
-fn native_popups(adapter: &Win32WindowAdapter) -> Vec<Rc<Win32WindowAdapter>> {
+pub(super) fn native_popups(adapter: &Win32WindowAdapter) -> Vec<Rc<Win32WindowAdapter>> {
     adapter
         .inner()
         .active_popups()

@@ -870,21 +870,21 @@ impl Win32WindowAdapter {
         self.popup.as_ref().map(|p| p.margin.get()).unwrap_or_default()
     }
 
-    /// The HWND of the window that isn't a popup, this one or the one its popups belong to.
-    /// Whether the keys go to this window: the window has the keyboard focus, or it's the popup
-    /// that gets the keys of its owner.
+    /// The window that isn't a popup: this one, or the one its popups belong to.
     #[cfg(feature = "accessibility")]
-    fn has_keyboard_focus(&self) -> bool {
-        let Some(top_level) = self.top_level_hwnd() else { return false };
-        if unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetFocus() } != top_level {
-            return false;
+    fn top_level(&self) -> Option<Rc<Self>> {
+        match &self.popup {
+            Some(popup) => popup.parent.upgrade()?.top_level(),
+            None => self.self_weak.upgrade(),
         }
-        let key_window = match &self.popup {
-            Some(popup) => popup.parent.upgrade().map(|parent| parent.key_window()),
-            None => Some(self.key_window()),
-        };
-        key_window.is_some_and(|key_window| {
-            core::ptr::addr_eq(Rc::as_ptr(&key_window), self as *const Self)
+    }
+
+    /// Whether the keys that arrive at the top-level window come to this one: it's the
+    /// top-level window and no popup takes them, or it's the popup that does.
+    #[cfg(feature = "accessibility")]
+    fn gets_keys(&self) -> bool {
+        self.top_level().is_some_and(|top_level| {
+            core::ptr::addr_eq(Rc::as_ptr(&top_level.key_window()), self as *const Self)
         })
     }
 
@@ -901,6 +901,7 @@ impl Win32WindowAdapter {
         self.popup.is_none() && !menu::disabled() && self.menu_bar.declared()
     }
 
+    /// The HWND of the window that isn't a popup, this one or the one its popups belong to.
     fn top_level_hwnd(&self) -> Option<HWND> {
         match &self.popup {
             Some(popup) => popup.parent.upgrade()?.top_level_hwnd(),
@@ -1076,6 +1077,12 @@ impl WindowAdapter for Win32WindowAdapter {
             }
         }
         self.visible.set(visible);
+        // The core shows a popup before it adds it to the active popups, and moves the focus
+        // item after it hides one.
+        #[cfg(feature = "accessibility")]
+        if self.popup.is_some() {
+            accesskit::sync_keyboard_focus_later(self);
+        }
         if visible {
             self.sync();
         } else {
@@ -1438,7 +1445,7 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             accesskit.handle_app_message(&adapter.window, wp);
             return LRESULT(0);
         }
-        if let Some(result) = accesskit.handle(msg, wp, lp) {
+        if let Some(result) = accesskit.handle(&adapter, msg, wp, lp) {
             return result;
         }
     }

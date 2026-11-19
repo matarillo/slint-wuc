@@ -1,10 +1,11 @@
 // Copyright © Kentaro Inomata
 // SPDX-License-Identifier: MIT-0
 
-// Accessible items, for a UI Automation client: a text, a button and a checkbox.
+// Accessible items, for a UI Automation client: a text, a button and a checkbox, and a field
+// that opens a popup that takes the keys.
 export component AccessibilityTest inherits Window {
     width: 200px;
-    height: 100px;
+    height: 140px;
     title: "Accessible";
     in-out property <int> clicks;
     in-out property <bool> checked;
@@ -36,5 +37,40 @@ export component AccessibilityTest inherits Window {
         accessible-label: "Check";
         accessible-checkable: true;
         accessible-checked: root.checked;
+    }
+
+    field := FocusScope {
+        x: 0;
+        y: 70px;
+        width: 80px;
+        height: 30px;
+        accessible-role: text-input;
+        accessible-label: "Field";
+    }
+
+    popup := PopupWindow {
+        x: 100px;
+        y: 70px;
+        width: 80px;
+        height: 30px;
+        close-policy: no-auto-close;
+        forward-focus: choice;
+
+        choice := FocusScope {
+            accessible-role: list-item;
+            accessible-label: "Choice";
+        }
+    }
+
+    public function focus-field() {
+        field.focus();
+    }
+
+    public function open-popup() {
+        popup.show();
+    }
+
+    public function close-popup() {
+        popup.close();
     }
 }

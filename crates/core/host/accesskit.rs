@@ -24,7 +24,7 @@ use accesskit::{
 };
 
 use super::Win32WindowAdapter;
-use core::cell::RefCell;
+use core::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -45,6 +45,13 @@ const ACTIONS: usize = 1;
 pub(super) struct AccessKit {
     platform: Rc<Platform>,
     adapter: RefCell<AccessKitAdapter>,
+    /// For a top-level window: whether it has the keyboard focus, and no menu is open and it
+    /// doesn't move or resize. UI Automation moves the focus to an open menu, and to nothing
+    /// while the window moves or resizes.
+    window_focused: Cell<bool>,
+    /// Whether AccessKit was last told that the window has the focus: the top-level window is
+    /// focused, and the keys come to this window.
+    has_focus: Cell<bool>,
 }
 
 impl AccessKit {
@@ -53,24 +60,37 @@ impl AccessKit {
         Self {
             adapter: RefCell::new(AccessKitAdapter::new(window_adapter_weak, platform.clone())),
             platform,
+            window_focused: Cell::new(false),
+            has_focus: Cell::new(false),
         }
     }
 
     /// Handles `WM_GETOBJECT` and follows the keyboard focus of the window; `None` for the
     /// messages that the window handles as before.
-    pub(super) fn handle(&self, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
+    pub(super) fn handle(
+        &self,
+        window_adapter: &Win32WindowAdapter,
+        msg: u32,
+        wp: WPARAM,
+        lp: LPARAM,
+    ) -> Option<LRESULT> {
         match msg {
             WM_GETOBJECT => return self.platform.handle_wm_getobject(wp, lp),
             WM_SETFOCUS | WM_KILLFOCUS => {
-                self.platform.update_window_focus_state(msg == WM_SETFOCUS);
+                self.window_focused.set(msg == WM_SETFOCUS);
+                sync_keyboard_focus(window_adapter);
                 if let Ok(mut adapter) = self.adapter.try_borrow_mut() {
                     adapter.window_focus_changed();
                 }
             }
-            // UI Automation moves the focus to an open menu, and to nothing while the window
-            // moves or resizes.
-            WM_EXITMENULOOP | WM_EXITSIZEMOVE => self.platform.update_window_focus_state(true),
-            WM_ENTERMENULOOP | WM_ENTERSIZEMOVE => self.platform.update_window_focus_state(false),
+            WM_EXITMENULOOP | WM_EXITSIZEMOVE => {
+                self.window_focused.set(true);
+                sync_keyboard_focus(window_adapter);
+            }
+            WM_ENTERMENULOOP | WM_ENTERSIZEMOVE => {
+                self.window_focused.set(false);
+                sync_keyboard_focus(window_adapter);
+            }
             _ => {}
         }
         None
@@ -201,6 +221,45 @@ fn with_access_kit_adapter(
     {
         f(&access_kit.adapter);
     }
+}
+
+/// Tells AccessKit which window of a top-level window and its popups has the focus: the one
+/// that gets the keys, as long as the top-level window is focused. A popup never gets the
+/// keyboard focus of Windows, and the host hands it the keys of its owner instead.
+pub(super) fn sync_keyboard_focus(window_adapter: &Win32WindowAdapter) {
+    let Some(top_level) = window_adapter.top_level() else { return };
+    let focused = top_level.accesskit.get().is_some_and(|a| a.window_focused.get());
+    let key_window = top_level.key_window();
+    let mut pending = Vec::from([top_level]);
+    while let Some(window_adapter) = pending.pop() {
+        pending.extend(super::popup::native_popups(&window_adapter));
+        let Some(access_kit) = window_adapter.accesskit.get() else { continue };
+        let has_focus = focused && core::ptr::addr_eq(Rc::as_ptr(&key_window), &*window_adapter);
+        if access_kit.has_focus.replace(has_focus) == has_focus {
+            continue;
+        }
+        if has_focus {
+            // The tree names the focus item only for the window that gets the keys: name it
+            // before AccessKit raises the focus event.
+            access_kit.handle_focus_item_change();
+        }
+        access_kit.platform.update_window_focus_state(has_focus);
+    }
+}
+
+/// [`sync_keyboard_focus`] once the core is done with the change at hand, such as showing or
+/// closing a popup.
+pub(super) fn sync_keyboard_focus_later(window_adapter: &Win32WindowAdapter) {
+    if window_adapter.hwnd.get().is_none() {
+        return;
+    }
+    let Some(top_level) = window_adapter.top_level() else { return };
+    let top_level = Rc::downgrade(&top_level);
+    crate::timers::Timer::single_shot(Default::default(), move || {
+        if let Some(top_level) = top_level.upgrade() {
+            sync_keyboard_focus(&top_level);
+        }
+    });
 }
 
 /// Where the window's root item is in its client area, which a popup's margin moves.
@@ -536,7 +595,7 @@ impl NodeCollection {
     fn focus_node(&mut self, window_adapter_weak: &Weak<Win32WindowAdapter>) -> NodeId {
         window_adapter_weak
             .upgrade()
-            .filter(|window_adapter| window_adapter.has_keyboard_focus())
+            .filter(|window_adapter| window_adapter.gets_keys())
             .and_then(|window_adapter| {
                 let window_inner = WindowInner::from_pub(window_adapter.window());
                 window_inner

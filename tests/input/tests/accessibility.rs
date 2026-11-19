@@ -1,25 +1,28 @@
 // Copyright © Kentaro Inomata
 // SPDX-License-Identifier: MIT-0
 
-//! What a UI Automation client finds in a window: the items' names, roles and states, and
-//! the actions it can invoke.
+//! What a UI Automation client finds in a window: the items' names, roles and states, the
+//! actions it can invoke, and where it hears that the focus moves.
 //!
 //! The client runs on a thread of its own, as a screen reader runs in a process of its own.
 //! The test thread owns the window and handles its messages meanwhile. The window is never
-//! shown.
+//! shown, but a popup that it opens is, without being activated.
 //!
 //! The platform belongs to the thread that first uses it, so one test runs every scenario.
 
 use i_slint_core::host::Win32WindowAdapter;
 use slint::ComponentHandle;
-use std::sync::mpsc;
+use std::sync::{Mutex, mpsc};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
 };
 use windows::Win32::UI::Accessibility::*;
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::{Ref, implement};
 
 slint::include_modules!();
 
@@ -177,9 +180,109 @@ fn the_client_sees_changes() {
     assert_eq!(toggle_state(&f), ToggleState_On);
 }
 
+/// A focus event that a client got: the element that has the focus.
+#[derive(Clone, Debug)]
+struct FocusEvent {
+    name: String,
+    has_keyboard_focus: bool,
+}
+
+#[implement(IUIAutomationFocusChangedEventHandler)]
+struct FocusHandler {
+    events: Mutex<mpsc::Sender<FocusEvent>>,
+}
+
+impl IUIAutomationFocusChangedEventHandler_Impl for FocusHandler_Impl {
+    fn HandleFocusChangedEvent(
+        &self,
+        sender: Ref<IUIAutomationElement>,
+    ) -> windows::core::Result<()> {
+        let element = sender.ok()?;
+        let name = unsafe { element.CurrentName() }.map(|n| n.to_string()).unwrap_or_default();
+        let has_keyboard_focus =
+            unsafe { element.CurrentHasKeyboardFocus() }.is_ok_and(|focus| focus.as_bool());
+        let _ = self.events.lock().unwrap().send(FocusEvent { name, has_keyboard_focus });
+        Ok(())
+    }
+}
+
+/// A client that listens for the focus events of the whole desktop, as a screen reader does,
+/// on a thread of its own.
+struct FocusEvents {
+    events: mpsc::Receiver<FocusEvent>,
+    stop: mpsc::Sender<()>,
+    thread: JoinHandle<()>,
+    seen: Vec<FocusEvent>,
+}
+
+impl FocusEvents {
+    fn listen() -> Self {
+        let (sender, events) = mpsc::channel();
+        let (stop, stopped) = mpsc::channel::<()>();
+        let (ready, listening) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok().unwrap() };
+            let automation: IUIAutomation =
+                unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.unwrap();
+            let handler: IUIAutomationFocusChangedEventHandler =
+                FocusHandler { events: Mutex::new(sender) }.into();
+            unsafe { automation.AddFocusChangedEventHandler(None, &handler) }.unwrap();
+            let _ = ready.send(());
+            let _ = stopped.recv();
+            unsafe { automation.RemoveAllEventHandlers() }.unwrap();
+        });
+        listening.recv_timeout(Duration::from_secs(10)).expect("the client listens");
+        Self { events, stop, thread, seen: Vec::new() }
+    }
+
+    /// The first focus event on an element named `name` from now on, while this thread
+    /// handles the window's messages.
+    fn wait_for(&mut self, name: &str) -> FocusEvent {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            pump_messages();
+            while let Ok(event) = self.events.try_recv() {
+                self.seen.push(event.clone());
+                if event.name == name {
+                    return event;
+                }
+            }
+            assert!(Instant::now() < deadline, "no focus event on {name}: {:?}", self.seen);
+        }
+    }
+
+    fn stop(self) {
+        let _ = self.stop.send(());
+        while !self.thread.is_finished() {
+            pump_messages();
+        }
+        self.thread.join().unwrap();
+    }
+}
+
+/// A popup that gets the keys of its window never gets the keyboard focus of Windows, but
+/// the client hears that the focus moves into it, and back when it closes.
+fn the_focus_follows_a_popup_that_gets_the_keys() {
+    let f = Fixture::new();
+    let mut events = FocusEvents::listen();
+    unsafe { SetFocus(Some(f.hwnd)) }.unwrap();
+    f.ui.invoke_focus_field();
+    events.wait_for("Field");
+
+    f.ui.invoke_open_popup();
+    let choice = events.wait_for("Choice");
+    assert!(choice.has_keyboard_focus, "{choice:?}");
+
+    f.ui.invoke_close_popup();
+    let field = events.wait_for("Field");
+    assert!(field.has_keyboard_focus, "{field:?}");
+    events.stop();
+}
+
 #[test]
 fn ui_automation() {
     the_client_finds_the_items();
     invoking_a_button_runs_its_action();
     the_client_sees_changes();
+    the_focus_follows_a_popup_that_gets_the_keys();
 }
