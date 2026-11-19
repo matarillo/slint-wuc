@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Opens a real window with `NestedRects` and changes the color of one rectangle every second.
 //!

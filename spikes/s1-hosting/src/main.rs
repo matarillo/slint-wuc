@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Spike S1: host a Windows.UI.Composition visual tree in a Win32 window.
 //!

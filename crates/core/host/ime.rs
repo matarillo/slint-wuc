@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! The input method, through IMM32 as winit (and so upstream on Windows) uses it (S4).
 //!

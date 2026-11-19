@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! What happens to a composition when the focus leaves its text input: as in TSF, a focus move
 //! commits it into the input it was typed in, and deactivating the window keeps it.

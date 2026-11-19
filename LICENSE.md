@@ -1,3 +1,45 @@
+# License of slint-wuc
+
+slint-wuc is a modified version of [Slint](https://slint.dev) 1.19.0 by SixtyFPS GmbH.
+Kentaro Inomata has modified it since 2026-11-18; the git history records each change.
+SixtyFPS GmbH is not responsible for this fork: ask about it in this repository, not at
+info@slint.dev.
+
+## What Each File Is Under
+
+The header of each file, or `REUSE.toml` for files that can't carry one, gives its copyright and
+license. The license texts are in `LICENSES/`.
+
+- **Files from upstream** keep SixtyFPS's copyright notice and upstream's license, mostly the
+  triple license below, however much the fork changed them.
+- **The fork's changes**, both new files and the modifications of upstream's files, are
+  Copyright © Kentaro Inomata, under the [MIT No Attribution License](LICENSES/MIT-0.txt) (MIT-0).
+  MIT-0 asks for nothing, not even attribution, so a modified upstream file can be used under
+  upstream's licenses as before. Upstream takes contributions under MIT-0 for the same reason.
+- **Code ported from other projects** keeps its own notice and license, such as
+  `crates/core/host/menu/dark_bar.rs`, ported from muda (Apache-2.0 OR MIT).
+
+## Using It in an Application
+
+The fork changes nothing in upstream's terms below. In practice:
+
+- **GPLv3**: as with upstream.
+- **Royalty-free License 2.0**: for desktop, mobile and web applications, provided the
+  application shows that it uses Slint (the `AboutSlint` widget or the Slint badge), as with
+  upstream. The license grants the right to distribute Slint modified, as part of an application,
+  so we read it as covering this fork too. SixtyFPS hasn't confirmed this reading.
+- **Commercial license (Slint Software License 3.0)**: it covers the versions SixtyFPS makes
+  available under a paid plan. Whether it covers this fork is unknown; ask SixtyFPS.
+
+This repository itself distributes Slint on its own, not as part of an application. Upstream's
+Royalty-free and commercial licenses don't permit that and point to the GPLv3 for it, so the
+repository, as a whole, is distributed under the GPLv3.
+
+---
+
+The rest of this file is upstream's `LICENSE.md` of Slint 1.19.0, unchanged. Its links to
+`FAQ.md` and `CONTRIBUTING.md` refer to [upstream's repository](https://github.com/slint-ui/slint),
+and its section on contributions is about contributions to upstream.
 
 # Slint License
 

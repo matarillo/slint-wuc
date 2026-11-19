@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Runs UI scenarios on upstream's gallery and on the fork's, through the MCP server that each
 //! embeds, and saves upstream | fork | difference images for each step.

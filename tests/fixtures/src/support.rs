@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! What every fixture shares: the geometry properties of an element, the plumbing that
 //! connects a component to its window, and the `ItemTree` methods that none of the fixtures

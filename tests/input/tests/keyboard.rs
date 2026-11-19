@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Keyboard messages sent to the hidden HWND of a window, what reaches its focus scope, and the
 //! clipboard.

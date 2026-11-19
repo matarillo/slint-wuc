@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright © Kentaro Inomata
+# SPDX-License-Identifier: MIT-0
 #
 # Shows a probe over a magenta backdrop window of its own at the right edge of the primary screen,
 # captures only the probe's rectangle, and reports whether the window lets the backdrop through.

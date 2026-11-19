@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Shows `ui/popups.slint`. With `--check`, opens the combo box with keys and prints the
 //! visual tree of its popup window after each step.

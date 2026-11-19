@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! The drawing devices of a UI thread: a D3D11 device, its Direct2D device, the composition
 //! graphics device that makes drawing surfaces from it, and DirectWrite font faces for the

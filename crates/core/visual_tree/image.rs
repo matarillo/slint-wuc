@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Image items: the image's pixels in a composition drawing surface that every item showing
 //! the image shares, placed by upstream's `fit()` / `fit9slice()` (`docs/design/visual-tree.md`,

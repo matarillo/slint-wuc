@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Spike S5: composition effects without Win2D, images on surfaces, box shadows, backdrop blur
 //! and the window's system backdrop.

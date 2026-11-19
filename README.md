@@ -118,5 +118,14 @@ The plan and the design notes are in `docs/`, mostly in Japanese.
 
 ## License
 
-The fork keeps upstream's copyright notices and licenses. As with upstream, you can use it under
-any of the licenses in [LICENSE.md](LICENSE.md).
+Files from upstream keep SixtyFPS's copyright notices and upstream's licenses. The fork's own
+changes are Copyright © Kentaro Inomata, under MIT-0, which asks for nothing more. So an
+application uses the fork on upstream's terms:
+
+- under the GPLv3, or
+- under the Royalty-free License 2.0, for desktop, mobile and web applications that show they use
+  Slint (the `AboutSlint` widget or the Slint badge). That this covers a modified version
+  distributed by a third party is our reading, not confirmed by SixtyFPS.
+
+Whether upstream's commercial license covers the fork is unknown. See [LICENSE.md](LICENSE.md)
+for the details.

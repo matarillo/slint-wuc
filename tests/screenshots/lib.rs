@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Renders the screenshot cases of upstream Slint with `Window::take_snapshot()` and compares
 //! them with the references in `references/`. The tests that `build.rs` generates call [`init`]

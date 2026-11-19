@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! `ResizeFollower`: a window whose child rectangle's geometry is a binding on the window item's
 //! `width` and `height`, so a window resize moves and resizes it.

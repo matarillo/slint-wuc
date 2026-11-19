@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Runs a probe: shows the component, or with `--check`, applies changes step by step from a
 //! timer, prints the visual tree after each, and quits.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Spike S4: text laid out by DirectWrite, drawn by Direct2D into composition drawing surfaces.
 //!

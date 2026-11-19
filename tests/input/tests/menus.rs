@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! The native menus of a window: its Win32 menu bar, built from a `MenuBar`, and the request
 //! to open a `ContextMenuArea`'s menu.

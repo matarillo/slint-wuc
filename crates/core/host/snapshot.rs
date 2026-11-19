@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! `Window::take_snapshot()`: what the compositor draws for a window's visuals, read back
 //! through `GraphicsCaptureItem::CreateFromVisual` (S3).

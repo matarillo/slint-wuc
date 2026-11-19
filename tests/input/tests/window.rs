@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! The frame and state of a window, from the properties of its `Window` item, and what the
 //! window reports back when the user changes its state.

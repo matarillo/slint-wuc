@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! The frame and state of a top-level window, from the properties of its `Window` item, as
 //! upstream's winit backend applies them on Windows: `no-frame`, `always-on-top`,

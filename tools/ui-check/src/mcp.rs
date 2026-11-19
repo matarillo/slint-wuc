@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! A client of the MCP server that upstream's testing backend embeds (`mcp_server.rs`): JSON-RPC
 //! over HTTP, one request per connection.

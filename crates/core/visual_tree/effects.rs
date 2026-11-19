@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Composition effect brushes without Win2D: Direct2D effects described to the compositor
 //! through `IGraphicsEffectD2D1Interop` (S5).

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Shows `ui/mica.slint` with the Mica system backdrop. `--menu` shows the window with a
 //! `MenuBar`; `--no-mica` leaves the backdrop unset, for comparison.

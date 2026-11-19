@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: MIT OR Apache-2.0
+# Copyright © Kentaro Inomata
+# SPDX-License-Identifier: MIT-0
 #
 # Builds upstream's examples on the fork, with their sources unmodified, as an application
 # written for upstream Slint would build after following the README.

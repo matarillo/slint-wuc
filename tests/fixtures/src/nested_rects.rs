@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! `NestedRects`: a window with two levels of nested rectangles, each with its own background and
 //! geometry.

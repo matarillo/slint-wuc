@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Renders upstream screenshot cases headless with `Window::take_snapshot()`, saves them to the
 //! directory given as argument, and compares them with upstream's Skia references.

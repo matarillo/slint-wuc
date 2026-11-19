@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! What a UI Automation client finds in a window: the items' names, roles and states, and
 //! the actions it can invoke.

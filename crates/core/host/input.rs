@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Mouse input: Win32 mouse messages become the pointer events of the window
 //! (`docs/design/input.md`).

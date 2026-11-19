@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 // Cases that can't pass yet, each with the missing piece, and cases that pass against a
 // reference of their own though it differs from upstream's.

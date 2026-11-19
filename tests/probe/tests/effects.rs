@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Runs `probe-effects --check`: the Clip, Opacity, Transform and Layer elements that the
 //! compiler inserts for `clip`, `opacity`, `transform-*` and `cache-rendering-hint`.

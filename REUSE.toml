@@ -1,0 +1,37 @@
+# Copyright © Kentaro Inomata
+# SPDX-License-Identifier: MIT-0
+
+# Licenses of the files that can't carry a header, in the REUSE format (https://reuse.software).
+# The entries for files copied from upstream are upstream's own, from its REUSE.toml.
+
+version = 1
+
+# Copied from upstream.
+[[annotations]]
+path = [
+  "crates/core/graphics/image/testdata/**",
+  "crates/core-macros/link-data.json",
+  "crates/common/README.md",
+  "crates/core/README.md",
+  "crates/core-macros/README.md",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © SixtyFPS GmbH <info@slint.dev>"
+SPDX-License-Identifier = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0"
+
+# The fork's renderings of upstream's test scenes, as upstream licenses its own.
+[[annotations]]
+path = "tests/screenshots/references/**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = [
+  "Copyright © SixtyFPS GmbH <info@slint.dev>",
+  "Copyright © Kentaro Inomata",
+]
+SPDX-License-Identifier = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0"
+
+# Written for the fork.
+[[annotations]]
+path = ["README.md", "docs/**", ".gitignore", "**/Cargo.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © Kentaro Inomata"
+SPDX-License-Identifier = "MIT-0"

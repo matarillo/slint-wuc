@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! The system's color scheme and accent color, which the context hands to the styles, as
 //! upstream's winit backend reports them on Windows.

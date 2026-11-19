@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! `BoxShadow` items: upstream's shadow textures, drawn with Direct2D into a composition drawing
 //! surface (`docs/design/visual-tree.md`, "Shadows").

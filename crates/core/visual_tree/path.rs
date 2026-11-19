@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! `Path` items: the fitted path as a Direct2D geometry in one composition sprite shape
 //! (`docs/design/visual-tree.md`, "Paths").

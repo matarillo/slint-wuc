@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Runs `probe-scrolling --check`: a Flickable clips to itself, and scrolling moves only the
 //! viewport, the child the compiler puts between the Flickable and its content.

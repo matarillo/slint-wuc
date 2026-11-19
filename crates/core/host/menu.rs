@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Native menus, as upstream's winit backend shows them on Windows through `muda`: a `MenuBar`
 //! is the window's Win32 menu bar, and a `ContextMenu` opens a Win32 popup menu.

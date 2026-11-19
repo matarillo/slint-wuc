@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT OR Apache-2.0
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
 
 //! Measures startup time, visual count, memory and sync pass times, and checks that repeated
 //! creation and removal of rows, popups and windows gives back what it took.
