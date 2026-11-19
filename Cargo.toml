@@ -9,11 +9,11 @@ exclude = ["reference", "spikes", "tools/upstream-gallery"]
 resolver = "3"
 
 [workspace.package]
-authors = ["Slint Developers <info@slint.dev>"]
+authors = ["Kentaro Inomata", "Slint Developers <info@slint.dev>"]
 documentation = "https://slint.dev/docs"
 homepage = "https://slint.dev"
 license = "GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0"
-repository = "https://github.com/slint-ui/slint"
+repository = "https://github.com/matarillo/slint-wuc"
 rust-version = "1.95"
 version = "1.19.0"
 
