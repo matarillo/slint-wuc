@@ -69,6 +69,7 @@ As upstream's winit backend does on Windows with `muda`:
   The mode is process-wide and follows the host's color scheme, so a high contrast theme gets the default mode.
   Upstream's winit and `muda` don't call it, so upstream's popup menus stay light in dark mode.
   Checked on build 26200 by opening a popup menu in a process forced to dark: Windows 11's dark menu (`#2C2C2C`), with the check mark and the disabled entry drawn for it.
+  With the system in dark mode, the owner saw `examples/backdrop`'s context menu dark (2026-11-19).
 - `SLINT_NO_MUDA` turns both off, as upstream does, and the core draws the menus in popups instead.
 - A detached window has no native menus, as upstream's testing backend.
 
