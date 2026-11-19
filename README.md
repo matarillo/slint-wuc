@@ -10,7 +10,7 @@ project.
 - Applications keep upstream's `.slint` files and Rust code. The `.slint` compiler is upstream's,
   unmodified: `slint-build` or the `slint!` macro, version 1.19.0. Only the runtime crate,
   `slint`, comes from this repository.
-- Windows 11 (build 22000 or later) and Rust 1.95 or later.
+- Windows 11 (build 22621, version 22H2, or later) and Rust 1.95 or later.
 - Rust only: there are no C++, JavaScript or Python bindings, no `slint-interpreter` and no live
   preview.
 
