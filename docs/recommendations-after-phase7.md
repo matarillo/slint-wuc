@@ -6,8 +6,8 @@
 レビューの主張のうち、推奨の上位を支える次の 4 点はコードで確かめました。
 
 - ホストが HWND を外に出さないこと (2026-11-19 に `Window::window_handle()` で出すようにした)
-- README がないこと
-- `slint!` マクロがないこと
+- README がないこと (2026-11-19 に書いた)
+- `slint!` マクロがないこと (2026-11-19 に足した)
 - カーソル画像が未対応なこと
 
 それ以外の主張で、ビルドや GUI の実行が要るものは推測のままです。
@@ -22,7 +22,7 @@
 ## 推奨する順序
 
 1. `Window::window_handle()` を使えるようにする (リスト外、S)。2026-11-19 に済み
-2. 使い始めの入口を作る (リスト外、S の作業が複数)
+2. 使い始めの入口を作る (リスト外、S の作業が複数)。2026-11-19 に済み
 3. Mica を、1 を使うサンプルで見せる (S〜M)
 4. 上流の `examples/custom-titlebar` とライブリサイズの見た目を確かめる (リスト外、S)。2026-11-19 に済み (透けない角を直した)
 5. マルチモニター DPI を検証する (S〜M、機材しだいで並行して可)
@@ -58,15 +58,22 @@ Mica、ダークモードへの追従、アクセント色、ネイティブメ�
 
 ### 2. 使い始めの入口
 
-- 現状【確認】:
-  - ルートに README がありません。facade は `publish = false` です。
-  - `crates/slint/lib.rs` には「`slint!` マクロはない」とあり、`docs/design/symbol-inventory.md` の「kept」という記載と食い違っています。
-- 上流の feature 名 (`backend-winit`、`renderer-skia` など) を指定したアプリは、patch してもビルドに失敗するはずです【推測】。
-- 作業:
-  - README に `[patch.crates-io]` の手順を書きます。
-  - 上流の feature 名を、何もしない feature として受け付けます。
-  - `slint!` マクロを用意します。crates.io の `slint-macros` 1.19.0 の再輸出で済みます【確認】。リポジトリの外のクレートで、`slint-macros` の `slint!` (`Button`、プロパティ、コールバック) をフォークの `slint` と組み合わせ、ビルドと実行が通りました (2026-11-19)。
-- 検証: 上流の examples を 2〜3 本、無改造のまま patch でビルドするスクリプトを用意します。
+2026-11-19 に済みました。
+
+- 元の状態:
+  - ルートに README がありませんでした。facade は `publish = false` です (git の依存と patch には影響しない)。
+  - `crates/slint/lib.rs` には「`slint!` マクロはない」とあり、`docs/design/symbol-inventory.md` の「kept」という記載と食い違っていました。
+  - 上流の feature 名 (`backend-winit`、`renderer-skia` など) を指定したアプリは、ビルドに失敗するはずでした【推測】。
+- したこと:
+  - ルートの `README.md` (英語) に、git の依存と `[patch.crates-io]` の両方の手順を書きました。配布の形は、短期的には両方を併記して公開することにしました (判断事項 3)。URL は公開するまで `<owner>/<repo>` のままです。
+  - README の末尾に、フォークを開発する人向けの節を置きました。`reference/slint-1.19.0` の用意の仕方 (上流のタグ `v1.19.0` の clone。タグは実在を確認) と、それがないと失敗するものを書いています。アプリを作る人には `reference/` は要りません。
+  - facade に、上流の feature のうち、バックエンド、レンダラー、プラットフォームの選択に当たるもの (30 個) を、何もしない feature として足しました。`image-pixel-format-rgb565` と `image-pixel-format-gray8` は core に渡します。独自の API を持つ feature (`unstable-*`、`live-preview`、`system-testing`) は足していません。足すと、ビルドが途中で「項目がない」と失敗し、原因が分かりにくくなるためです。今は Cargo が「その feature はない」と止めます。
+  - `slint!` は、crates.io の `slint-macros = "=1.19.0"` を上流と同じく `pub use slint_macros::slint;` で再輸出しています。上流の facade も `slint-macros` を常に依存に持つので、その点も同じです。
+- 検証【確認】:
+  - `crates/slint/tests/macro.rs`: `slint!` で作ったコンポーネント (`Button`、プロパティ、コールバック) が動くこと。
+  - `tools/upstream-examples.ps1`: 上流の `memory` (`slint!`、`default-features = false`)、`slide_puzzle` (`build.rs`)、`system-tray` (`slint!`、既定の feature) を、ソースは無改造のまま、git の依存と patch の両方でビルドします。6 通りすべて通り、`Cargo.lock` の `slint` がフォーク版であることも確かめます。例は上流のリポジトリと同じ深さに置きます。`../../logo` の画像を読むものがあるためです。
+  - patch の形は `slint = "1.19"` で書いています。crates.io の最新がまだ 1.19.0 なので、1.20 が出たあとも patch が選ばれるかは確かめられていません【推測】。
+  - `reference/` を一時的に外して確かめたこと: `cargo build -p slint` は通ります。ワークスペースのビルドは、`tests/probe`、`tests/driver`、`tests/screenshots` のビルドスクリプトで失敗します。
 
 ### 3. Mica
 
@@ -302,8 +309,8 @@ Mica を出す公開 API (`DWMWA_SYSTEMBACKDROP_TYPE`) が効くのは 22621 以
 - `slint-build` を `"=1.19.0"` と完全一致で指定する【確認】。
   - 生成されたコードは、`slint::VersionCheck_1_19_0` のように、コンパイラーのバージョンの名前を持つ型を参照します。フォークにあるのは `VersionCheck_1_19_0` だけです。
   - `"1.19"` と書くと、Cargo は 1.x の最新 (上流が 1.20 を出していれば 1.20) を選び、ビルドに失敗します。
-- 上流だけにある feature を指定しない。`backend-winit`、`renderer-skia` などを指定すると、Cargo が「その feature はない」と止まります【推測】。フォークの feature は `std`、`compat-1-*`、`accessibility`、`system-tray`、`log`、`serde`、`gettext` です。推奨 2 で、上流の feature 名を何もしない feature として受け付ける予定です。
-- 上流だけにある API を使わない。`slint!` マクロ、`slint::winit_030`、ソフトウェアレンダラーなどです。
+- 上流だけにある API の feature を指定しない。バックエンドとレンダラーの選択に当たる feature (`backend-winit`、`renderer-skia` など) は、2026-11-19 から何もしない feature として受け付けます。`unstable-*`、`live-preview`、`system-testing` を指定すると、Cargo が「その feature はない」と止まります。
+- 上流だけにある API を使わない。`slint::winit_030`、ソフトウェアレンダラー、独自のプラットフォームの設定などです。`slint!` マクロは 2026-11-19 から使えます。
 - Windows 11 で、Rust 1.95 以降を使う。
 
 アプリの依存関係には `i-slint-common` が 2 つ載ります。コンパイラー用とランタイム用に 1 つずつで、どちらも実際にビルドされます【確認】。
@@ -420,6 +427,8 @@ README には両方を書けます。crates.io への公開は、ライブラリ
 1. フォーク独自の API をどこまで認めるか。facade だけに `slint::windows` のような拡張を足すか、HWND とサンプルにとどめるか。Mica、タイトルバー、ハイコントラストのすべてに関わる。考え方は「フォーク独自の拡張の考え方」を参照。
 2. 見せる相手は Rust の開発者だけか、C++ の開発者も含むか。
 3. 配布の形 (git の依存、別名での crates.io 公開、patch の手順だけ) とライセンスの表記。README の内容が決まる。考え方は「配布の形の考え方」を参照。
+   - 短期は決定済み (2026-11-19): git の依存と patch を両立する形で公開、配布する。README に両方を書いた。
+   - 長期の形 (別名での crates.io 公開をするか) と、ライセンスの表記のうち、フォークで変えた部分の著作権者と、Royalty-free 2.0 を派生物の利用者にそのまま適用できるかは、まだ決めていない。
 4. 最低 OS をビルド 22000 のままにするか、上げるか。Mica の公開 API は 22621 以降。考え方は「最低 OS の考え方」を参照。
 5. マルチモニターの検証に、仮想ディスプレイドライバーを入れてよいか (管理者権限が要る)。
 6. (決定済み、2026-11-19) 透明背景の `no-frame` ウィンドウで、DWM の枠線と角丸を外すか。上流と同じ見え方だったので、外しません。

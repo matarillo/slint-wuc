@@ -31,6 +31,45 @@ gettext = ["i-slint-core/gettext-rs"]
 raw-window-handle-06 = ["dep:raw-window-handle-06", "i-slint-core/raw-window-handle-06"]
 # Starts the MCP server when the `SLINT_MCP_PORT` environment variable is set.
 mcp = ["dep:i-slint-backend-testing", "i-slint-backend-testing/mcp"]
+image-pixel-format-rgb565 = ["i-slint-core/image-pixel-format-rgb565"]
+image-pixel-format-gray8 = ["i-slint-core/image-pixel-format-gray8"]
+
+# Upstream's features that choose a backend, a renderer or a platform option. They do nothing
+# here: the runtime has one host and one renderer, Windows.UI.Composition. They are accepted so
+# that `Cargo.toml` files written for upstream Slint build unchanged.
+# Features that expose an API of their own (`unstable-*`, `live-preview`, `system-testing`) are
+# left out, so that Cargo names them instead of the build failing on a missing item.
+backend-default = []
+backend-qt = []
+backend-winit = []
+backend-winit-x11 = []
+backend-winit-wayland = []
+backend-linuxkms = []
+backend-linuxkms-libseat = []
+backend-linuxkms-libinput = []
+backend-linuxkms-noseat = []
+backend-linuxkms-libdlmclient = []
+backend-android-activity-05 = []
+backend-android-activity-06 = []
+renderer-femtovg = []
+renderer-femtovg-wgpu = []
+renderer-skia = []
+renderer-skia-opengl = []
+renderer-skia-vulkan = []
+renderer-skia-software = []
+renderer-software = []
+renderer-vello = []
+renderer-winit-femtovg = []
+renderer-winit-skia = []
+renderer-winit-skia-opengl = []
+renderer-winit-skia-vulkan = []
+renderer-winit-software = []
+software-renderer-systemfonts = []
+software-renderer-path = []
+libm = []
+unsafe-single-threaded = []
+# Always on: the runtime decodes every format that upstream's default backends decode.
+image-default-formats = []
 
 [dependencies]
 # Generated code decodes the images it embeds at run time, as upstream's default backends do.
@@ -43,3 +82,6 @@ once_cell = { version = "1.5", default-features = false, features = ["std"] }
 pin-weak = { version = "1.1", default-features = false }
 vtable = { workspace = true }
 raw-window-handle-06 = { workspace = true, optional = true }
+# The `slint!` macro, as upstream re-exports it. Like `slint-build`, it is upstream's compiler,
+# unmodified, and must match the runtime's version.
+slint-macros = "=1.19.0"
