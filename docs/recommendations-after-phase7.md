@@ -1,6 +1,6 @@
 # Phase 7 の後のおすすめ
 
-2026-11-18 時点の整理です。
+2026-11-18 時点の整理です。2026-11-19 に、進み具合と、次のセッションへの引き継ぎ (「次にやること」) を足しました。
 目的は、このフォークがモダンな Windows アプリの基盤として有効だと示すことです。
 材料は、`docs/plan.md` の「Phase 7 の後に持ち越したこと」と、文脈を持たない Opus のサブエージェントによる読み取り専用のレビュー (同日) です。
 レビューの主張のうち、推奨の上位を支える次の 4 点はコードで確かめました。
@@ -449,8 +449,42 @@ README には両方を書けます。crates.io への公開は、ライブラリ
   - 「slint-wuc」という名前の商標上の扱い。特に crates.io に公開する場合。
 - 確かめるまでは、`LICENSE.md` と README に、上の 2 つのライセンスの点を「私たちの解釈」「不明」と書いておく。
 
+## 次にやること (2026-11-19 の引き継ぎ)
+
+済んだもの: 推奨 1、2、4。ライセンスの表記と、配布の形の短期の分 (判断事項 3)。リポジトリ名は `matarillo/slint-wuc`。
+コミットはすべて `main` にあり、まだどこにも push していません (オーナーの判断で後回し)。
+
+### 次の候補
+
+1. 推奨 3 (Mica を見せるサンプル)。先に決めることがあります。
+   - 判断事項 1: フォーク独自の API をどこまで認めるか。HWND とサンプルにとどめるなら、今の `probe-mica` の延長で済みます。
+   - 判断事項 8: Slint 描画のメニューバーへの切り替え方 (今は環境変数 `SLINT_NO_MUDA`)。
+   - 判断事項 4: 最低 OS。Mica の公開 API は 22621 以降です。今の最低は 22000 です。
+   - サンプルは、ショーケースのプローブ (「推奨する順序」の後の段落) の最初の一部にできます。
+2. 推奨 5 (マルチモニター DPI)。判断事項 5 (仮想ディスプレイドライバーを入れてよいか、管理者権限が要る) が先です。
+3. 推奨 6 (OLE ドラッグ&ドロップの受け側) と推奨 7 (ポップアップのフォーカスを UI Automation に伝える)。どちらも判断を待たずに始められます。
+4. push の後にすること:
+   - GitHub に `matarillo/slint-wuc` を作って push します。
+   - README の `rev = "<commit>"` を実際のコミットにするか、タグを付けて `tag = "..."` にします。
+   - 本物の git の URL で、上流の examples がビルドできるかを確かめます。`tools/upstream-examples.ps1 -Form git` は今、path で代用しています。
+
+### 作業の前提
+
+- ビルドとテストは PowerShell から実行します。Bash の cargo は MSVC のリンカーを見つけられません。
+- テストは `cargo test --workspace --lib --bins --tests` を使います。`cargo test --workspace` は、core の doctest 51 件で失敗します。前からある失敗で、`docs/plan.md` に記録しています。
+- `reference/slint-1.19.0` (追跡していない) がないと、ワークスペースのビルドとテストの多くが失敗します。取得の仕方は README の「Developing the fork」にあります。
+- フォークで新しく書くファイルのヘッダーは、`Copyright © Kentaro Inomata` と `SPDX-License-Identifier: MIT-0` です。上流のコードを元にしたファイルは、上流のヘッダーのままにします (`docs/design/license.md`)。
+- 確かめるための道具:
+  - `tools/backdrop-capture.ps1`: 窓が後ろを透かすか (Mica など) を色で見ます。
+  - `tools/upstream-examples.ps1`: 上流の examples を、git の依存と patch の両方の形でビルドします。
+  - `tools/ui-check`: 上流とフォークを MCP で比べます。
+
 ## 確かめていないこと
 
 - リダイレクション面を残したまま `DwmEnableBlurBehindWindow` と黒の背景ブラシを使っても透けなかった理由
 - `no-frame` の窓で、`WS_CAPTION` がないことによるスナップや最小化のアニメーションの違い
 - `no-frame` と MenuBar の併用 (上流もしていないので、優先度は低い)
+- `AboutSlint` ウィジェットが、このフォークで正しく描けるか。Royalty-free 2.0 で使うアプリは、`AboutSlint` かバッジで Slint を使っていることを示す必要があります。描けないなら、残る手段はバッジだけです。
+- crates.io に上流の 1.20 が出たあとも、`slint = "1.19"` に対して patch の 1.19.0 が選ばれるか。今は crates.io の最新が 1.19.0 なので、試せません。
+- `REUSE.toml` とヘッダーが REUSE の仕様を満たすか。`reuse lint` は回していません。
+- 本物の git の URL でフォークを依存に取ったとき、取得とビルドが通るか (push の後)。
