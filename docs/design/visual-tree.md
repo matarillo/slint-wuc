@@ -1,234 +1,111 @@
 # Visual Tree Sync Engine
 
 Based on spikes [S1](spike-s1-hosting.md), [S2](spike-s2-primitives.md), and [S3](spike-s3-verification.md), and settled in Phase 2.
-The code is `crates/core/visual_tree.rs` and `crates/core/host.rs`.
 
 ## Goal
 
 Keep one `Windows.UI.Composition` visual per item in sync with the item tree, touching only the visuals whose properties changed.
 Rendering itself is the compositor's job; the runtime never draws a frame.
 
-## How Upstream Detects Changes
+## Change Detection
 
-Upstream's `PartialRenderer::compute_dirty_regions` walks the **whole** item tree on every redraw.
-Each item has a `PropertyTracker` in a cache entry that `CachedRenderingData` points to.
-The walk compares each item's geometry with the cached one and asks its tracker whether rendering properties changed.
-Every tracker that isn't dirty registers as a dependency of the window's `redraw_tracker` (`WindowInner::draw_contents`), so any later change dirties the window and requests a redraw.
-Structural changes (repeaters, conditionals, popups) are caught because the walk itself reads the repeater models.
+Upstream's `PartialRenderer::compute_dirty_regions` walks the **whole** item tree on every redraw, comparing each item's geometry with a cached one and asking a per-item `PropertyTracker` whether rendering properties changed.
+Clean trackers register as dependencies of the window's redraw tracker, so any later change requests a redraw; structural changes (repeaters, conditionals, popups) are caught because the walk reads the repeater models.
 
-## Design
+The sync pass (`WindowInner::sync_visuals`, in place of `draw_contents`) keeps that scheme, and updates visuals where upstream would repaint.
 
-### Sync Pass
+- The root visual's scale is applied inside the window tracker, so a scale factor change requests a pass.
+- An item's content is updated again when its size changed, even with a clean tracker: the size is an argument of `update_visual`, so its tracker can't see it change.
+- Nodes of live items that a pass doesn't visit are detached but kept: a conditional or a replaced component may come back.
+- The dispatcher queue commits implicitly when the handler returns (S1), so a pass needs no explicit commit.
+- Why not a dirty queue: the pass walks all items whenever anything changed, like upstream. Switch to per-node dirty handlers only if profiling shows the walk above about 1 ms for realistic trees; Phase 7's measurements didn't.
+- Item structs never hold COM objects: the node handle lives in `CachedRenderingData` (index and generation), so the generated code's layout and `FieldOffsets` stay unchanged (`compat-contract.md`).
 
-`WindowInner::sync_visuals` replaces `draw_contents`.
-The host runs it on the UI thread when the window's tracker is dirty, at most once per frame tick or message batch.
-
-1. `ensure_tree_instantiated()` outside any tracking, as upstream does.
-2. Evaluate the walk inside the window tracker (`evaluate_as_dependency_root`), so the walk's reads register as dependencies.
-   The root visual's scale is applied here too, from `WindowInner::scale_factor()`, so a scale change requests a pass.
-3. Visit items back to front.
-   Generated code visits in `z` order (`visit_item_tree_z_sorted`) when an element sets `z`.
-   For each item:
-   - Look up or create its node through `cached_rendering_data` (index + generation into the window's node table).
-   - **Geometry**: read `item_rc.geometry()`; if it differs from the node's cached geometry, set `Offset`/`Size` on the visual.
-   - **Content**: if the node's content tracker is dirty (or new), or the size changed, evaluate `ItemVTable::update_visual` inside it.
-     The size is an argument of `update_visual`, so its tracker can't see it change.
-     Otherwise register the clean tracker as a dependency of the window tracker.
-   - The node keeps what `update_visual` returned, so a clean node skips its children as its last update said.
-   - **Children**: compare the visited child sequence with the node's previous one and patch the `VisualCollection` (see below).
-4. Nodes of live items not visited in this pass are detached but kept: a conditional or a replaced component may come back.
-   `unregister_item_tree` releases nodes when their items are destroyed, and the pass drops any node whose item is gone.
-5. The dispatcher queue commits implicitly when the handler returns (S1).
-
-The pass walks all items whenever anything changed, like upstream.
-If profiling shows the walk above about 1 ms for realistic trees, switch to per-node dirty handlers that enqueue nodes, plus a structure tracker per node with dynamic children.
-
-### Node Table
-
-- Per window, a slab of nodes: `{ visual, kind, item, geometry, content, result, children, parent }`.
-- `CachedRenderingData { cache_index, cache_generation }` stays in every item struct (it's part of the generated-code contract) and holds the node handle.
-  A generation mismatch means "no node yet".
-- Item structs never hold COM objects, so the generated code's layout and the `FieldOffsets` stay unchanged.
-- `unregister_item_tree` releases the nodes of the items it lists through `Renderer::free_graphics_resources`.
-
-### Visuals per Item
-
-| Item | Visual | Set by `update_visual` |
-| --- | --- | --- |
-| `Empty`, `Layer` | `ContainerVisual` | nothing |
-| `Rectangle`, `WindowItem` | `SpriteVisual`, or a container when transparent | color brush, reused across color changes; gradient brushes with absolute mapping |
-| `BasicBorderRectangle`, `BorderRectangle` | `ContainerVisual` with a floor `ShapeVisual`; a sprite without border and radius | a fill shape and a stroke shape laid out by upstream's `BorderRectLayout`, or clipped sprites for a conic gradient; see [Antialiasing](#antialiasing) and [Conic Gradients](#conic-gradients) |
-| `Opacity` | `ContainerVisual` | `Opacity`, which is group opacity on a container (S2) |
-| `Clip` | `ContainerVisual` | `InsetClip`, or `CompositionGeometricClip` with a rounded rectangle or path |
-| `Transform` | `ContainerVisual` | `TransformMatrix` |
-| `Flickable` | `ContainerVisual` | `InsetClip` to the item, as upstream's `render` clips |
-| Text items | `ContainerVisual` with a content sprite and a surface brush | the text drawn into a drawing surface; see [Text](#text) |
-| `ImageItem`, `ClippedImage` | `ContainerVisual` with a floor sprite, and a child sprite per part of a nine-slice image | surface brushes, through effects for tiling and colorize; see [Images](#images) |
-| `BackdropBlur` | `ContainerVisual` with a floor sprite | a blur effect over a backdrop brush; see [Images](#images) |
-| `Path` | `ContainerVisual` with a floor `ShapeVisual` | one sprite shape on a geometry made from the fitted path; see [Paths](#paths) |
-| `BoxShadow` | `ContainerVisual` with a floor sprite | the shadow texture drawn into a drawing surface; see [Shadows](#shadows) |
+## Items
 
 - `Transform` builds the matrix itself: Composition's `Scale` and `RotationAngle` apply scale before rotation, and Slint rotates first.
 - `Layer`'s `cache-rendering-hint` has no equivalent; Composition retains content anyway.
-- `Flickable` scrolls through its viewport, the `Empty` child the compiler puts between it and its content:
-  scrolling changes the viewport's `x` and `y`, so only that visual's `Offset` changes.
-- When an item needs a different visual type (a radius becomes non-zero), the node creates the new visual,
-  copies offset, size, opacity, clip and transform, moves the children over, and replaces it in the parent's collection.
+- `Flickable` scrolls through the `Empty` viewport the compiler puts between it and its content, so scrolling changes only that visual's `Offset`.
+- `Opacity` is a container's `Opacity`, which is group opacity (S2).
 
 ### Text
 
-Text items (`SimpleText`, `ComplexText`, `StyledTextItem`, `TextInput`) keep upstream's layout: `textlayout/sharedparley` shapes and positions the glyphs, as it does for upstream's renderers ([S4](spike-s4-text.md)).
-Only the drawing is new.
+Text items keep upstream's layout: `textlayout/sharedparley` shapes and positions the glyphs, as for upstream's renderers ([S4](spike-s4-text.md)). Only the drawing is new.
 
-- **Recording.** `update_visual` calls upstream's `sharedparley::draw_text` or `draw_text_input` with a recording `GlyphRenderer`.
-  It keeps the glyph runs, rectangles (selection, cursor, decorations) and clips as a display list, in physical pixels relative to the item.
-  Nothing touches Direct2D while parley walks the layout.
-- **Bounds.** The display list's bounds decide the surface: the union of the drawn glyphs and rectangles, padded for ink that overhangs the advances, cut by the clips in effect.
-  They aren't the item's rectangle: an elided text keeps its last line even when it overflows the item, and alignment can put lines above it.
-- **Surface.** The node stays a container and gets a content sprite: the first of its children, below the items' visuals, which children patching inserts above it.
-  The sprite shows a `CompositionDrawingSurface` of the bounds' size, rounded up to whole pixels, through a `CompositionSurfaceBrush` with `SnapToPixels`, and is offset to the bounds' origin in logical pixels.
-  A list with nothing to draw removes the sprite.
-- **Replay.** The display list is drawn into the surface with a Direct2D device context at the window's scale factor, grayscale antialiasing.
-  Glyph runs go through DirectWrite font faces made from parley's font data, without copying it: the faces are cached per font blob, face index, simulation and variation settings.
-  Color glyphs (emoji) go through `TranslateColorGlyphRun`: COLRv1 paint trees (Segoe UI Emoji on Windows 11) need `IDWriteFactory8` and `ID2D1DeviceContext7::DrawPaintGlyphRun`; COLRv0 layers, bitmaps and SVG glyphs have their own calls.
-  As in upstream's renderers, a translucent text color is the opacity of a color glyph as a whole (a Direct2D layer), with the layers in the text color opaque within it, and a bitmap glyph stays upright in faux italic.
-  Strokes draw the glyph outlines; faux italic skews the run around its baseline, faux bold is DirectWrite's bold simulation.
-  The code is in `visual_tree/text.rs` (recording and replay) and `visual_tree/graphics.rs` (devices and faces).
-- **Changes.** The node's content tracker sees what parley reads, including the window's scale factor, so a change of text, style, size or scale factor redraws the surface.
-  The cursor's blinking is a property too: it redraws the text input, which costs about 25 µs (S4).
-- **Device.** One D3D11 device, its D2D device, and one `CompositionGraphicsDevice` per UI thread, shared by its windows.
-  When the device is lost or replaced, every text and shadow node is marked dirty and redraws.
-  The devices are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
-- **Cache.** The window's renderer keeps upstream's `TextLayoutCache`, which measurement and drawing share; destroyed components leave it as in upstream's renderers.
-- **Input method.** `TextInput`'s `update_visual` sends the input method an update when the focused input's text changed, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
-- **Clips.** Upstream's text drawing clips to rectangles only, so the recorder ignores the radius `combine_clip` takes.
-- **Not yet.** A text larger than 16384 pixels is cut off (virtual surfaces would lift that).
+- `update_visual` records parley's drawing as a display list and replays it into a drawing surface with Direct2D, so nothing touches Direct2D while parley walks the layout.
+- The surface covers what's drawn, not the item: an elided text keeps its last line even when it overflows the item, and alignment can put lines above it.
+- Color glyphs: COLRv1 paint trees (Segoe UI Emoji on Windows 11) need `IDWriteFactory8` and `ID2D1DeviceContext7::DrawPaintGlyphRun`. As in upstream's renderers, a translucent text color is the opacity of a color glyph as a whole, and a bitmap glyph stays upright in faux italic.
+- The content tracker sees what parley reads, including the scale factor. The cursor's blinking is a property too: it redraws the text input, which costs about 25 µs (S4).
+- Devices: one D3D11, D2D and `CompositionGraphicsDevice` per UI thread. When the device is lost or replaced, every text and shadow node redraws.
+  They are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
+- `TextInput` updates the input method from `update_visual`, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
+- Upstream's text drawing clips to rectangles only, so the recorder ignores the radius of a clip.
+- A text larger than 16384 pixels is cut off (virtual surfaces would lift that).
 
 ### Antialiasing
 
 Upstream's Skia renderer antialiases rounded rectangles, clips with a radius, and everything under a rotation, and draws axis-aligned rectangles without.
-The compositor antialiases edges, clips and shapes only in `CompositionBorderMode::Soft`; the default `Hard` snaps them to pixels.
+The compositor antialiases only in `CompositionBorderMode::Soft`; the default `Hard` snaps to pixels.
 
-- A `Transform` that rotates, a clip with a radius, a rounded rectangle's shapes, and a `Path` with `anti-alias` get `Soft`.
-  Everything else inherits, so it's `Hard` unless a rotation is above it.
-- Soft mode also antialiases the edges of the visual's own bounds.
-  Where a shape's edge lies on them, both apply and the edge comes out lighter than upstream's.
-  So a node's shapes are in a floor `ShapeVisual` that reaches 1 logical pixel past the item on each side, with the shapes offset by that margin.
-  Being below the children, the floor's border mode doesn't pass on to them.
+- A rotating `Transform`, a clip with a radius, a rounded rectangle's shapes, and a `Path` with `anti-alias` get `Soft`; everything else inherits.
+- Soft mode also antialiases the edges of the visual's own bounds. Where a shape's edge lies on them, both apply and the edge comes out lighter than upstream's.
+  So a node's shapes are in a floor `ShapeVisual` that reaches 1 logical pixel past the item on each side. Being below the children, its border mode doesn't pass on to them.
 - An arc of radius 0 ends a Direct2D figure where Composition reads it, so a square corner of a per-corner rounded rectangle has no arc.
-
-Gradients interpolate straight colors in the compositor and premultiplied colors in upstream's renderers (Skia's `InPremul::Yes`).
-Between stops of different alpha, `shapes.rs` adds seven intermediate stops that follow the premultiplied blend, and gives a transparent stop the color of its neighbor on each side.
+- Gradients interpolate straight colors in the compositor and premultiplied colors in upstream's renderers. Between stops of different alpha, seven intermediate stops follow the premultiplied blend, and a transparent stop takes its neighbor's color on each side.
 
 ### Conic Gradients
 
-Neither Composition nor Direct2D has a conic gradient brush.
-`visual_tree/conic.rs` computes the gradient on the CPU: each bitmap pixel takes the color at its center, interpolated premultiplied as Skia's sweep gradient does.
+Neither Composition nor Direct2D has a conic gradient brush, so it's computed on the CPU, interpolated premultiplied as Skia's sweep gradient.
 
-- **Composition.** The bitmap goes into a drawing surface behind a `CompositionSurfaceBrush` with `Stretch::None` and a transform that scales it to the item.
-  It covers the item only: a stroke that reaches outside the item has no gradient there.
-- **Density.** Where the item lies at a fractional pixel, the compositor samples the bitmap between its pixels, which blurs abrupt color changes such as the seam at 12 o'clock.
-  The bitmap has up to four pixels per device pixel, within a budget of 2^20 pixels, so that the blur stays a fraction of a pixel wide.
-  It's drawn at the window's scale factor, which `make_brush` reads only for a conic gradient, so that other brushes don't redraw when it changes.
-- **Shapes.** A sprite shape rejects a surface brush ("Unsupported source brush type").
-  A rounded rectangle or a path with a conic fill or stroke shows each part as a sprite with a `CompositionGeometricClip` of the part's outline, in a floor container with the shape visual's margin.
-  A stroke's outline is its geometry widened by Direct2D, with the path's caps, joins and dashes (Direct2D's dashes are in stroke widths).
+- Where the item lies at a fractional pixel, the compositor samples the bitmap between its pixels, which blurs abrupt changes such as the seam at 12 o'clock.
+  So the bitmap has up to four pixels per device pixel, within 2^20 pixels, and is drawn at the window's scale factor. Only a conic gradient reads the scale factor, so that other brushes don't redraw when it changes.
+- A sprite shape rejects a surface brush ("Unsupported source brush type"), so a rounded rectangle or a path with a conic fill or stroke shows each part as a sprite clipped to the part's outline.
   The compositor antialiases these clips about a tenth lighter than Skia antialiases a path.
-- **Direct2D.** Text and shadows paint a conic gradient with a bitmap brush over the same pixels, at one pixel per device pixel.
+- The gradient covers the item only: a stroke that reaches outside the item has no gradient there.
 
 ### Images
 
 `ImageItem` and `ClippedImage` place the image as upstream's Skia renderer does (`draw_image_impl`), with the effects of [S5](spike-s5-effects.md).
-The code is in `visual_tree/image.rs`.
 
-- **Parts.** `fit()`, or `fit9slice()` for a nine-slice image, gives the parts to draw, in physical pixels.
-  One part shows in the node's floor sprite; the nine parts of a nine-slice image show in children of it.
-- **Placement.** Each part's sprite has a `CompositionSurfaceBrush` with `Stretch::None`, alignment ratios 0, and a transform from raster pixels to the sprite: the part's clip moved to the origin, scaled by `source_to_target`.
-  Upstream draws images from a whole-pixel origin (`pixel_align_origin`), so the floor sprite has `IsPixelSnappingEnabled`.
-  A single part's fractional offset goes into the brush transform and an inset clip, so that only the item's origin snaps.
-  The brush itself doesn't snap: `SnapToPixels` would also round the fractional offsets inside a scaled part.
-  Tiles start at the part's offset cut to whole pixels, as upstream's `as i32` does.
-- **Raster.** A bitmap shows at its own size.
-  An SVG is rasterized at `scalable_render_size`, which keeps its aspect ratio as `tiny_skia::IntSize::scale_to` does; the brush stretches it over the requested size, as upstream's renderers do.
-  When the transforms of its ancestors magnify it, it's rasterized larger by that magnification rounded up to a power of two (`transformed_scalable_render_size`, #10903), up to 2048 pixels.
-  The image reads the ancestors' transforms through its tracker, so a change of one updates it; a surface of the same raster size is reused.
-- **Surfaces.** One `CompositionDrawingSurface` per image's pixel data, raster size, and part, shared by the items that show it.
-  The pixels go in with `CopyFromMemory` into the surface's own bitmap.
-  A tiled part needs a surface of its own, since the `Border` effect wraps the whole surface.
-  The cache keeps up to 64 MiB of surfaces, least recently used first out; items keep the surfaces they show either way, since composition surfaces have no weak references.
-  A replaced device re-uploads the pixels of a surface when an item shows it next.
-- **Effects.** Tiling is a `Border` effect with wrap on the tiled axes; colorize is a `Composite` effect with `SOURCE_IN`, the colorize brush as source.
-  `Border` takes a source parameter only, so the tiles are colorized after tiling.
-  That's the same for a color; a gradient spans the first tile instead of repeating with the tiles.
-  Effect factories are cached per graph (`visual_tree/effects.rs`).
-- **Rendering.** `ImageRendering::Pixelated` sets `NearestNeighbor` on the surface brush.
-- **Known differences.** The compositor rounds a negative half-pixel origin up, where Skia rounds it away from zero: an image at x = -5.5 shows one pixel right of upstream's.
-
-`BackdropBlur` shows a `GaussianBlur` effect over a `CompositionBackdropBrush` in its floor sprite.
-The blur amount is in logical pixels, since the root visual carries the scale factor.
-A backdrop brush sees only what's behind its sprite, so the sprite reaches 3σ beyond the item and an inset or rounded clip cuts it back to the item, as upstream's blur picks up content that far.
+- Upstream draws images from a whole-pixel origin, so the floor sprite snaps to pixels. A single part's fractional offset goes into the brush transform instead, so that only the item's origin snaps; `SnapToPixels` on the brush would also round the offsets inside a scaled part. Tiles start at the part's offset cut to whole pixels, as upstream's `as i32`.
+- An SVG under magnifying transforms is rasterized larger by that magnification, rounded up to a power of two, up to 2048 pixels (`transformed_scalable_render_size`, #10903). The image reads the ancestors' transforms through its tracker, so a change of one updates it.
+- Surfaces are shared per pixel data, raster size and part, in a 64 MiB cache. Items keep the surfaces they show either way, since composition surfaces have no weak references.
+- A tiled part needs a surface of its own, since the `Border` effect wraps the whole surface.
+- `Border` takes a source parameter only, so tiles are colorized after tiling: the same for a color, but a gradient spans the first tile instead of repeating.
+- The compositor rounds a negative half-pixel origin up, where Skia rounds it away from zero: an image at x = -5.5 shows one pixel right of upstream's.
+- `BackdropBlur`: a backdrop brush sees only what's behind its sprite, so the sprite reaches 3σ beyond the item and a clip cuts it back, as upstream's blur picks up content that far. The blur amount is in logical pixels, since the root visual carries the scale factor.
 
 ### Paths
 
 `Path` shows what upstream's Skia renderer draws in `draw_path`.
-The code is in `visual_tree/path.rs`.
 
-- **Geometry.** `fitted_path_events` gives the lyon events, which become a Direct2D path geometry in logical pixels, with `fill-rule` as the fill mode.
-  `CompositionPath` wraps it as it does for a rounded rectangle with different radii.
-  The shape is offset by the logical offset of the fit.
-- **Shape.** One `CompositionSpriteShape` in the node's floor `ShapeVisual`.
-  The fill brush is made for the item, or for the viewbox when there is one and scaled to the item, as upstream's.
-  The stroke brush is made for the item.
-- **Stroke.** `stroke-width` is the thickness; a width of 0 is a hairline of one physical pixel, as in Skia.
-  `stroke-line-cap` sets the start, end and dash caps; `stroke-line-join` maps `miter` to `MiterOrBevel`, which bevels beyond the miter limit as Skia does.
-  The dash array and offset are in logical pixels, which Composition takes as they are.
-  The offset wraps around the pattern.
-  A pattern that Skia ignores (an odd count, a negative length, a sum of 0) is solid here too.
-- **Antialiasing.** The floor's border mode is `Soft` for `anti-alias: true` and `Hard` for `false`; see [Antialiasing](#antialiasing).
-- **Bounds.** Composition cuts a shape off at the bounds of its visual.
-  The floor covers the item and what the path draws outside it: the geometry's bounds grown by the reach of the stroke, which is the miter limit in half widths, or the corner of a square cap.
-  With `clip: true` it covers the item only, with an `InsetClip` at the item's edges.
-  The compiler lowers `clip` on a `Rectangle` to a `Clip` element, but keeps it as a property of `Path`, whose `render` clips to the item's rectangle.
-- **Known differences.** Edge coverage differs from Skia's by a few levels, and rounded joins and caps by a pixel at their curves.
+- A stroke width of 0 is a hairline of one physical pixel, as in Skia. `miter` joins are `MiterOrBevel`, which bevels beyond the miter limit as Skia does. A dash pattern that Skia ignores (an odd count, a negative length, a sum of 0) is solid here too.
+- Composition cuts a shape off at its visual's bounds, so the floor covers what the path draws outside the item: the geometry's bounds grown by the stroke's reach (the miter limit in half widths, or a square cap's corner). With `clip: true` it covers the item only.
+  The compiler lowers `clip` on a `Rectangle` to a `Clip` element, but keeps it as a property of `Path`.
+- Edge coverage differs from Skia's by a few levels, and rounded joins and caps by a pixel at their curves.
 
 ### Shadows
 
-`BoxShadow` shows the texture that upstream's Skia renderer makes in `render_drop_shadow_image` and `render_inset_shadow_image`, drawn with Direct2D instead ([S5](spike-s5-effects.md)).
-The code is in `visual_tree/shadow.rs`.
+`BoxShadow` draws the texture of upstream's `render_drop_shadow_image` and `render_inset_shadow_image` with Direct2D's `Shadow` effect ([S5](spike-s5-effects.md)).
 
-- **Geometry.** `BoxShadowOptions` gives the shape, the sizes and the radii, as it does upstream.
-  A drop shadow's texture is `drop_texture_size()`, with the shape at the blur's padding; its sprite is at the item's offset minus blur and spread.
-  An inset shadow's texture is the item's size, at the item's origin.
-  Both are in physical pixels divided by the scale factor, and the sprite snaps to whole pixels as the images' do.
-- **Drawing.** The silhouette goes into a Direct2D command list: the rounded rectangle grown by the spread if the background is opaque, else what the background and the border paint, with their brushes; for an inset shadow, the item's rectangle with the hole cut out by the even-odd rule.
-  The `Shadow` effect blurs it with σ = `blur_sigma()` and colors it.
-  An inset shadow is then cut to the item's rounded rectangle with a `Composite` effect in `SOURCE_IN` mode.
-- **Surface.** The node's own surface sprite keeps its surface, which is resized when the texture's size changes and drawn again when the content tracker reruns.
-  The tracker sees the item's properties, the scale factor and the device generation.
-  There is no cache across nodes, as there is upstream: each node holds one texture.
-- **Shared code.** `visual_tree/graphics.rs` has what text and shadows both use: the surface of a sprite, Direct2D brushes for Slint's, and the recovery from a lost device.
-- **Known differences.** The `Shadow` effect's Gaussian differs from Skia's blur mask by a few levels near the shape's edge.
-  A shadow wider or higher than 16384 pixels isn't drawn.
+- Each node holds its own texture; upstream shares them in a cache across items.
+- The `Shadow` effect's Gaussian differs from Skia's blur mask by a few levels near the shape's edge.
+- A shadow wider or higher than 16384 pixels isn't drawn.
 
-### Snapshots
+## Snapshots
 
-`Window::take_snapshot()` syncs the window, moves its root visual into a container of the window's physical size, commits, and captures that container with `GraphicsCaptureItem::CreateFromVisual` ([S3](spike-s3-verification.md)).
-A hosted window's target shows the container meanwhile, so the window doesn't flash.
-The capture goes through a D3D11 device of its own, hardware or WARP, kept per thread and never released, like the drawing devices.
-The pixels come back as straight-alpha RGBA, as upstream's renderers return them.
-Capturing needs a desktop session with DWM.
+`Window::take_snapshot()` moves the root visual into a container of the window's size and captures it ([S3](spike-s3-verification.md)); a hosted window's target shows the container meanwhile, so the window doesn't flash.
+The pixels come back straight-alpha, as upstream's renderers return them. Capturing needs a desktop session with DWM.
+The capture device is never released, like the drawing devices.
 
-### Children Patching
+## Children Patching
 
-- Keep each node's child list from the previous pass.
-- In the common case (same list), do nothing.
-- Otherwise insert new visuals with `InsertAbove(new, previous_sibling)`, or `InsertAtBottom` for the first child, and remove dropped ones.
-  Never use `InsertAtTop`: it's linear per call (S2).
+- Never `InsertAtTop`: it's linear per call (S2). New visuals go in with `InsertAbove` the previous sibling.
 - Reordering (`z` changes) removes and reinserts the moved visuals.
 
-### Releasing Nodes
+## Releasing Nodes
 
-- Nodes go newest first, in the order of `Node::serial`: Composition releases objects oldest first in quadratic time.
+- Nodes go newest first: Composition releases objects oldest first in quadratic time.
   Removing 2000 text rows took 6.3 s oldest first and takes 37 ms newest first; 8000 rows take 149 ms.
   Releasing an old object while many newer ones live is slow as well, so anything that holds released visuals longer has to keep that order.
 - Known limitation: when hundreds of text surfaces are drawn and dropped with no commit in between, the compositor's graphics device keeps the atlas pages they took.
@@ -236,39 +113,22 @@ Capturing needs a desktop session with DWM.
   Each page is a texture with two render target views and two shader resource views, a `DxgkCompositionObject` and a `Section` handle, and a few MB of GPU memory; 1000 rows keep about 1.5 pages per cycle.
   `Close()`, reusing the surfaces, `ID2D1Device::ClearResources` and `Trim` don't free them; showing a popup or hiding another window sometimes does.
   Holding the released nodes until a commit has completed avoids it.
-- Rows created and removed in separate frames level off: 400 cycles of 1000 text rows left 4 objects.
-  `probe-perf` measures both.
+- Rows created and removed in separate frames level off: 400 cycles of 1000 text rows left 4 objects. `probe-perf` measures both.
 
-### Coordinates
+## Frames and Animations
 
-- Item geometry is relative to the parent item, in logical pixels.
-  Visual offsets use it directly.
-- The window's root visual carries `Scale = scale_factor`; the compositor snaps axis-aligned edges (S2).
-- Popups shown inside the main window (`PopupWindowLocation::ChildWindow`) get their own subtree above the main tree, offset by the popup location.
+- A property change requests one sync pass, coalesced until it runs.
+- A pass that finds active animations asks the frame thread (S1) for ticks on the compositor clock; each tick moves the animation tick to now, and the changes request the next pass.
+- While frames tick, only the frame tick moves the animation tick. The message loop still fires timers, but moving the animation tick on every message would request a pass per message and spin the loop.
+- With no animation nothing runs, and the message loop keeps the animation tick current, so that a new animation starts from now.
+- The root visual carries the scale factor; the compositor snaps axis-aligned edges (S2).
 
-### Frames and Animations
+## Testing
 
-- A property change dirties the window tracker; `request_redraw` posts one sync message, coalesced until the pass runs.
-- When a pass finds active animations, it asks the frame thread (S1) for ticks on the compositor clock.
-  Each tick moves the animation tick to now, and the resulting changes request the next pass.
-- While frames tick, only the frame tick moves the animation tick.
-  The message loop still fires timers, but moving the animation tick on every message would request a pass per message and spin the loop.
-- With no animation, nothing runs, and the message loop keeps the animation tick current so that a new animation starts from now.
-
-### Testing Hooks
-
-- Detached windows have no HWND: a root visual that hangs nowhere, with the scale factor tests dispatch (S3).
-  Their sync passes run when a test calls `sync_now`.
-- Dumps walk the real visual tree; pixel tests capture the root after `wait_commit` (`tests/fixtures`).
-- `tests/probe` runs code from the upstream compiler and dumps the tree of a real window after each step.
-- `tests/screenshots` renders upstream's screenshot cases with `take_snapshot` and compares them with references of this fork.
-  A case gets one when it's close to upstream's reference (Skia's where there is one), or when a review found the same layout and only the difference `exclusions.rs` gives (glyph rasterization, mostly).
+- `tests/screenshots` renders upstream's screenshot cases with `take_snapshot`. A case gets a reference of this fork when it's close to upstream's (Skia's where there is one), or when a review found the same layout and only the difference `exclusions.rs` gives (glyph rasterization, mostly).
   `SLINT_SCREENSHOT_REPORT=1` writes each case's difference to upstream's reference, with images side by side.
 
 ## Open Questions
 
-- Whether to share one brush per color across the window (S2 measured the memory difference).
-- How images and paths, which also draw into surfaces, follow the text design; settled with S5.
 - Whether long lists that aren't virtualized and change their texts every frame keep atlas pages too (deferred from Phase 7, see [Releasing Nodes](#releasing-nodes)).
-- `WindowInner::set_component` on a shown window keeps the old component alive until the window is hidden, as upstream does.
-  Generated code only sets the component before showing.
+- `WindowInner::set_component` on a shown window keeps the old component alive until the window is hidden, as upstream does. Generated code only sets the component before showing.

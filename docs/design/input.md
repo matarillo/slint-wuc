@@ -1,138 +1,79 @@
 # Input (Phase 3)
 
 The host turns Win32 messages into the events `WindowInner` already handles.
-Hit testing, focus, click counting, gestures and the input items stay in the upstream core (`input.rs`, `items/input_items.rs`), unchanged.
+Hit testing, focus, click counting, gestures and the input items stay in the upstream core, unchanged.
 Upstream's winit backend (`internal/backends/winit/winitwindowadapter.rs`) is the reference for what each event carries.
 
 ## Pointer
 
-- The mouse comes through `WM_MOUSEMOVE`, `WM_[LRMX]BUTTON{DOWN,UP,DBLCLK}`, `WM_MOUSEWHEEL`, `WM_MOUSEHWHEEL` and `WM_MOUSELEAVE`.
-  Don't use `EnableMouseInPointer`: it's process-wide and can't be undone, which matters to a host application that embeds Slint.
-- Touch and pen come through `WM_POINTERDOWN`, `WM_POINTERUPDATE`, `WM_POINTERUP` and `WM_POINTERCAPTURECHANGED`.
-  The handler doesn't pass them to `DefWindowProc`, so Windows doesn't also promote them to mouse messages.
-  - Touch (`PT_TOUCH`) becomes `InternalEvent::Touch`, with finger ids handed out per pointer id while it's down,
-    reused once lifted, as winit's `touch_finger_ids` does.
-  - Pen (`PT_PEN`) becomes mouse events with the left button, or the right one while the barrel button is held.
-  - A cancelled contact (`POINTER_FLAG_CANCELED`, or `WM_POINTERCAPTURECHANGED`) ends the touch as `Cancelled`, and the pen's press as `Exit`.
-    The core treats a cancelled single finger as a release, as upstream does, so it can still click.
-  - Updates of a pointer that came down on another window are ignored.
-  - The code is `crates/core/host/pointer.rs`.
-    Tests can't make Windows report a pointer without acting on the real screen,
-    so `Win32WindowAdapter::pointer_message_for_testing` takes what `GetPointerInfo` would return.
-- Positions are client pixels divided by the window's scale factor: logical coordinates.
-- Presses and releases carry `click_count: 0`; the core counts clicks with the platform's `click_interval`.
-- On a press, `SetCapture`; on the release of the last button, `ReleaseCapture`.
-  `WM_CAPTURECHANGED` while a button is down (another window took the mouse) dispatches `Exit`:
-  the press ends without a release, so nothing counts it as a click.
-- The first move after entering arms `TrackMouseEvent(TME_LEAVE)`.
-  `WM_MOUSELEAVE` dispatches `BackendMouseEvent::Exit` unless a button is down, as winit does;
-  then the release of the last button dispatches it.
-- The window class has no `CS_DBLCLKS`, so a second click is a plain button down.
-- Wheel: `delta / WHEEL_DELTA` lines, 60 logical pixels per line, as winit converts line deltas.
-  Use winit's Windows signs for both axes.
-  A precision touchpad sends smaller deltas through the same messages, and that's fine.
-- Cursor: `WM_SETCURSOR` with `HTCLIENT` sets the cursor that `WindowAdapterInternal::set_mouse_cursor` last asked for,
-  mapped to `IDC_*`; other hit-test codes go to `DefWindowProc`.
-  A change while the pointer is over the client area applies right away.
-  Image cursors show the arrow until Phase 5.
-- `WindowMoveArea` asks for `start_window_move` while the window dispatches a mouse move.
-  The host posts itself a message, and from there, if the left button is still down, ends the press with `Exit`,
-  releases the capture and sends `WM_NCLBUTTONDOWN` with `HTCAPTION`: the system's move loop, which returns on the button up.
+- Why not `EnableMouseInPointer`: it's process-wide and can't be undone, which matters to a host application that embeds Slint. The mouse stays on mouse messages; touch and pen come through `WM_POINTER*`.
+- Touch and pen messages don't go to `DefWindowProc`, or Windows also promotes them to mouse messages.
+  - Touch finger ids are handed out per pointer id while it's down and reused once lifted, as winit's `touch_finger_ids`.
+  - The pen is the mouse: the left button, or the right one while the barrel button is held.
+  - A cancelled contact ends the touch as `Cancelled`, which the core treats as a release for a single finger, as upstream does, so it can still click.
+  - Tests can't make Windows report a pointer without acting on the real screen, so `pointer_message_for_testing` takes what `GetPointerInfo` would return.
+- `WM_CAPTURECHANGED` while a button is down (another window took the mouse) dispatches `Exit`: the press ends without a release, so nothing counts it as a click.
+- `WM_MOUSELEAVE` dispatches `Exit` unless a button is down, as winit does; then the release of the last button dispatches it.
+- No `CS_DBLCLKS`: the core counts clicks itself, with the platform's `click_interval`, so a second click must be a plain button down.
+- Wheel: 60 logical pixels per line and winit's signs, so scrolling matches upstream. A precision touchpad sends smaller deltas through the same messages, and that's fine.
+- A cursor change while the pointer is over the client area applies right away, without waiting for `WM_SETCURSOR`. Image cursors show the arrow.
+- `WindowMoveArea` asks for `start_window_move` while the window dispatches a mouse move, so the system's move loop starts from a posted message, once that dispatch is over.
+  From there, if the left button is still down, ends the press with `Exit`, releases the capture and sends `WM_NCLBUTTONDOWN` with `HTCAPTION`: the move loop returns on the button up.
   Tests stop at the posted message, since the loop waits for the real button; the move itself is a manual check.
-- The code is `crates/core/host/input.rs`.
 
 ## Keyboard
 
-- `WM_KEYDOWN`, `WM_SYSKEYDOWN`, `WM_KEYUP` and `WM_SYSKEYUP` produce `InternalKeyEvent`s.
-  `WM_CHAR` only produces text that no key-down produced: `VK_PACKET` input from `SendInput`, and Alt codes.
-  The code is `crates/core/host/keyboard.rs`.
-- Key text, as in winit's Windows keyboard handling:
-  - Keys without a character map to Slint's key codes (`i_slint_common::key_codes`) through a virtual-key table:
-    Backspace, Tab, Return, Escape, Delete, the arrows, Insert, Home, End, Page Up and Down, F1 to F24, Scroll Lock, Pause, Print Screen (`SysReq`),
-    the menu key, and the modifiers with a code for each side (`Shift`/`ShiftR`, `Control`/`ControlR`, `Meta`/`MetaR`, `Alt`).
-    The right Alt is `AltGr` on a layout that has one: some key gives another character with Ctrl+Alt than without, which is how winit finds out.
-    Caps Lock has a code too, but upstream's winit backend sends nothing for it, and neither does this host.
-    The keys that Slint has no code for (Num Lock, media and browser keys, and so on) have no character either, and give no event.
-  - Character keys get their text from `ToUnicodeEx` with the current keyboard state, in the layout of the thread (`GetKeyboardLayout(0)`).
-    `text_without_modifiers` comes from the same call without Ctrl and Alt.
-    The flag that leaves the kernel's dead-key state alone (`0x4`, Windows 10 1607 and later) keeps the call from using up or setting a dead key.
-  - `ToUnicodeEx` alone doesn't compose dead keys:
-    the event loop calls `TranslateMessage` before the window procedure sees the key down,
-    and by then the dead key is pending (`ToUnicodeEx` of the dead key itself gives its character twice) or used up (the key after it gives `e`, not `é`).
-    So a key down first takes the `WM_CHAR`, `WM_SYSCHAR` and `WM_DEADCHAR` messages that `TranslateMessage` queued for it out of the queue
-    (they come first in the queue, as hardware input waits behind posted messages), and their text is the text of the event.
-    A `WM_DEADCHAR` makes the key a dead key: no event, and no release for it.
-    `ToUnicodeEx` gives the text when there are no such messages, as for a message sent with `SendMessage`.
-  - When Ctrl turns the text into a control character (Ctrl+C gives U+0003), the text is `text_without_modifiers`, so shortcuts see `c`.
-    Ctrl+Alt on a layout without AltGr gives no character at all, and is the same.
-  - The system sends a Ctrl before an AltGr, as AltGr is Ctrl+Alt: that Ctrl, found by looking at the next key message, isn't a key.
-  - The digits of an Alt code (Alt+0233 on the numeric keypad) aren't keys either; `WM_CHAR` delivers the character when Alt is released.
-- Auto-repeat (bit 30 of `lParam`) sets `KeyEvent::repeat`.
-- As in winit, every `WM_SYSKEYDOWN` also goes to `DefWindowProc`, whatever Slint did with it, which closes the window on Alt+F4 and opens the system menu on Alt+Space.
+- `WM_CHAR` only produces text that no key-down produced: `VK_PACKET` input from `SendInput`, and Alt codes.
+- Key text follows winit's Windows keyboard handling.
+  - The right Alt is `AltGr` on a layout that has one: some key gives another character with Ctrl+Alt than without, which is how winit finds out.
+  - Caps Lock has a key code, but upstream's winit backend sends nothing for it, and neither does this host. Keys that Slint has no code for (Num Lock, media keys) give no event.
+  - `ToUnicodeEx` is called with the flag that leaves the kernel's dead-key state alone (`0x4`, Windows 10 1607 and later), or the call uses up or sets a dead key.
+- Dead keys, and the order of messages: `ToUnicodeEx` alone doesn't compose them.
+  The event loop calls `TranslateMessage` before the window procedure sees the key down, and by then the dead key is pending (`ToUnicodeEx` of the dead key itself gives its character twice) or used up (the key after it gives `e`, not `é`).
+  So a key down first takes the `WM_CHAR`, `WM_SYSCHAR` and `WM_DEADCHAR` that `TranslateMessage` queued for it out of the queue (they come first, as hardware input waits behind posted messages), and their text is the event's text.
+  A `WM_DEADCHAR` makes the key a dead key: no event, and no release for it.
+  `ToUnicodeEx` gives the text when there are no such messages, as for a message sent with `SendMessage`.
+- Posting a key down and its key up together (`PostMessage`) puts the `WM_CHAR` behind the key up, where the key down can't find it, and the text arrives a second time. A real keyboard, `SendInput` and a pump that posts one message at a time don't.
+- When Ctrl turns the text into a control character (Ctrl+C gives U+0003), the text is the one without modifiers, so shortcuts see `c`.
+- The system sends a Ctrl before an AltGr, as AltGr is Ctrl+Alt: that Ctrl, found by looking at the next key message, isn't a key.
+- The digits of an Alt code aren't keys either; `WM_CHAR` delivers the character when Alt is released.
+- Every `WM_SYSKEYDOWN` also goes to `DefWindowProc`, as in winit, which closes the window on Alt+F4 and opens the system menu on Alt+Space.
   The key down of Alt+F4 isn't dispatched to Slint at all, so no `FocusScope` can keep the window from closing.
-  Neither `WM_SYSKEYUP` nor the release of Alt does: with no menu bar, `DefWindowProc` would start the system's menu mode on Alt, which takes the keyboard from the window.
-  The `WM_SYSCHAR` that Alt+Space made is out of the queue by then, and goes to `DefWindowProc` too.
-- `WM_ACTIVATE` dispatches `WindowActiveChanged`; on activation, `release_modifiers_not_held` with the modifiers `GetKeyState` reports.
-- Posting a key down and its key up to the queue together (`PostMessage`) puts the `WM_CHAR` behind the key up, where the key down can't find it,
-  and the text arrives a second time as `WM_CHAR`. A real keyboard, `SendInput` and a pump that posts one message at a time don't.
-- An input method's key downs (`VK_PROCESSKEY`) give no event; the text comes through the input method's messages below.
+  Neither `WM_SYSKEYUP` nor the release of Alt goes there: with no menu bar, `DefWindowProc` would start the system's menu mode on Alt, which takes the keyboard from the window.
+- On activation, the host releases the modifiers that `GetKeyState` no longer reports: their key ups went to another window.
 
 ## Input Method
 
 IMM32, as winit uses it on Windows ([S4](spike-s4-text.md)).
-The code is `crates/core/host/ime.rs`; the rest of the host only calls its `window_created`, `request`, `handle` and `deactivating`, so TSF can replace it (for reconversion, which upstream lacks too).
+The rest of the host only calls `ime.rs`'s `window_created`, `request`, `handle` and `deactivating`, so TSF can replace it (for reconversion, which upstream lacks too).
 
-- A new window has no input context (`ImmAssociateContextEx` with none), as in winit: typing goes to `WM_CHAR` until a text input asks for the input method.
-- `InputMethodRequest::Enable` gives the window the default context, and `Disable` takes it away.
-  A password input is treated as `Disable`, as Windows' own password edit controls take no input method text (winit ignores the purpose on Windows).
-- `Enable` and `Update` carry the caret rectangle in logical window coordinates.
-  It becomes physical client pixels for `ImmSetCandidateWindow` (`CFS_EXCLUDE`: the list opens below the caret and never covers it) and `ImmSetCompositionWindow` (`CFS_POINT`, for input methods that draw their own window).
+- A new window has no input context, as in winit: typing goes to `WM_CHAR` until a text input asks for the input method.
+- A password input is treated as `Disable`, as Windows' own password edit controls take no input method text (winit ignores the purpose on Windows).
+- The candidate list is placed with `CFS_EXCLUDE`, so it opens below the caret and never covers it.
 - `WM_IME_SETCONTEXT` clears `ISC_SHOWUICOMPOSITIONWINDOW`: the text input draws the composition inline, as upstream's renderers do with the preedit text.
-- `WM_IME_COMPOSITION` becomes one key event:
-  - with a result (`GCS_RESULTSTR`), `CommitComposition` with the result as text, and the new composition, if any, as preedit text;
-  - otherwise `UpdateComposition` with the composition (`GCS_COMPSTR`) as preedit text; an empty one clears the preedit text.
-  - The preedit selection is the clause being converted (`GCS_COMPATTR`, `ATTR_TARGET_*`), or else an empty range at `GCS_CURSORPOS`, in UTF-8 bytes, as winit computes it.
-  - The message doesn't go to `DefWindowProc`, which would send the result again as `WM_IME_CHAR`.
-- `WM_IME_ENDCOMPOSITION` without a result (Escape, or every character deleted) clears the preedit text.
+- `WM_IME_COMPOSITION` doesn't go to `DefWindowProc`, which would send the result again as `WM_IME_CHAR`.
 - A composition that the focus leaves behaves as TSF handles it, since the host may move to TSF and applications shouldn't see a difference then.
-  Windows has no single convention: a classic edit control doesn't complete the composition when it loses the focus (`EIMES_COMPLETECOMPSTRKILLFOCUS` is off by default),
-  while TSF commits it when the focus moves and keeps it when the window is deactivated (Mozilla bug 1053053), and browsers mostly commit it.
+  Windows has no single convention: a classic edit control doesn't complete the composition when it loses the focus (`EIMES_COMPLETECOMPSTRKILLFOCUS` is off by default), while TSF commits it when the focus moves and keeps it when the window is deactivated (Mozilla bug 1053053), and browsers mostly commit it.
   Upstream's text input drops it in both cases; the one thing every source agrees on is that it must never move into the next focused input.
   - **Focus moves** (a click, Tab, `focus()`, a popup): the text input inserts its preedit text when it loses the focus, and `Disable` cancels the input method's composition (`CPS_CANCEL`).
     By the time `Disable` arrives the focus has moved, so a commit from the input method would put the text into the next focused input.
   - **The window is deactivated**: the text input keeps its preedit text, and the host ignores the `Disable` that comes while it dispatches the deactivation, so the input method keeps the composition.
-    Activating the window again gives the focus back to the same text input, which enables the input method, and the user continues the composition.
+    Activating the window again gives the focus back to the same text input, and the user continues the composition.
     An input method that ends the composition on deactivation by itself sends the result or the end message, which reach the same text input, as the focus item stays.
-    The Microsoft Japanese IME does that through IMM32: it commits the composition when the window is deactivated (checked by hand), as WordPad does.
-    Through TSF it would keep it; nothing in Slint changes then.
+    The Microsoft Japanese IME does that through IMM32: it commits the composition when the window is deactivated (checked by hand), as WordPad does. Through TSF it would keep it; nothing in Slint changes then.
 
 ## Clipboard
 
-`Platform::set_clipboard_text` and `clipboard_text` use `CF_UNICODETEXT` through the message window, which owns the clipboard while it is open.
-Only `Clipboard::DefaultClipboard` exists on Windows: setting the selection clipboard does nothing, and reading it gives `None`.
-Windows programs exchange CRLF line breaks: text is written with them and read back with `\n`.
-`OpenClipboard` fails while another program has the clipboard open, so it is tried again a few times, 5 ms apart.
-A failure to write is logged with `debug_log`, as the trait has nowhere to report it.
+- Windows programs exchange CRLF line breaks: text is written with them and read back with `\n`.
+- `OpenClipboard` fails while another program has the clipboard open, so it's tried again a few times, 5 ms apart.
+- Only the default clipboard exists on Windows: the selection clipboard is X11's.
 
 ## Testing
 
-- `crates/testing` gets upstream's injection functions (`send_mouse_click`, `send_keyboard_char`, `send_keyboard_string_sequence`, and so on).
-  They dispatch through `Window::dispatch_event`, as upstream's do, so upstream's `tests/cases/input` and `focus` run unchanged.
-- The Win32 translation is tested separately in `tests/input`: a component from the upstream compiler gets a hidden HWND
-  (`Win32WindowAdapter::create_hwnd_for_testing`), synthesized messages go to it through `SendMessageW`,
-  and the test checks what reaches a `TouchArea` through the component's properties.
-  The platform belongs to the first thread that uses it, so one test runs all scenarios in turn.
-  Keyboard tests that depend on the keyboard layout pin it with `LoadKeyboardLayoutW("00000409")` or skip with a reason.
-  The host asks for the layout of the thread, so the test activates the layout with `ActivateKeyboardLayout` and no `KLF_SETFORPROCESS`:
-  that changes the layout of the test thread only, never the user's input language, and the test puts the old layout back.
-  Dead keys use the US-International layout (`00020409`), and AltGr the German one (`00000407`); each scenario skips if its layout is missing.
-- `ToUnicodeEx` reads the thread's keyboard state, which `SendMessageW` doesn't change: the test writes it with `SetKeyboardState`
-  (every key up, then the modifiers a scenario needs) and restores it at the end.
-  The thread takes no keyboard input from the real keyboard, and the window is never in the foreground, so nothing changes it back.
-  `GetKeyState`, which the activation uses, reads the same table.
-- A scenario that depends on `TranslateMessage` (dead keys, AltGr, text sent once) posts the key messages one at a time and pumps the queue
-  with `TranslateMessage` and `DispatchMessageW`, as the event loop does.
-- `DefWindowProc` turns Alt+F4 into `SC_CLOSE` only for the active window of the thread, shown or not.
-  The Alt+F4 scenario makes the hidden window the active window of the test thread with `SetActiveWindow`, which leaves the foreground window alone.
-- The clipboard test replaces the content of the user's clipboard and puts the text back at the end;
-  a clipboard that held something other than text is emptied.
+- `crates/testing`'s injection functions dispatch through `Window::dispatch_event`, as upstream's do, so upstream's `tests/cases/input` and `focus` run unchanged. The Win32 translation is tested separately in `tests/input`, with messages sent to a hidden HWND.
+- The platform belongs to the first thread that uses it, so each test file runs all its scenarios in one test.
+- Keyboard layouts: the host asks for the layout of the thread, so the tests activate a layout with `ActivateKeyboardLayout` and no `KLF_SETFORPROCESS`. That changes the test thread only, never the user's input language. Scenarios skip when their layout (US, US-International, German) is missing.
+- `ToUnicodeEx` and `GetKeyState` read the thread's keyboard state, which `SendMessageW` doesn't change: the tests write it with `SetKeyboardState` and restore it. The window is never in the foreground, so the real keyboard doesn't change it back.
+- Scenarios that depend on `TranslateMessage` (dead keys, AltGr, text sent once) post the key messages one at a time and pump the queue as the event loop does.
+- `DefWindowProc` turns Alt+F4 into `SC_CLOSE` only for the active window of the thread, so the scenario makes the hidden window active with `SetActiveWindow`, which leaves the foreground window alone.
+- The clipboard test replaces the user's clipboard and puts the text back; a clipboard that held something other than text is emptied.
