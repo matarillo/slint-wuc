@@ -65,7 +65,7 @@ Mica、ダークモードへの追従、アクセント色、ネイティブメ�
   - `crates/slint/lib.rs` には「`slint!` マクロはない」とあり、`docs/design/symbol-inventory.md` の「kept」という記載と食い違っていました。
   - 上流の feature 名 (`backend-winit`、`renderer-skia` など) を指定したアプリは、ビルドに失敗するはずでした【推測】。
 - したこと:
-  - ルートの `README.md` (英語) に、git の依存と `[patch.crates-io]` の両方の手順を書きました。配布の形は、短期的には両方を併記して公開することにしました (判断事項 3)。URL は公開するまで `<owner>/<repo>` のままです。
+  - ルートの `README.md` (英語) に、git の依存と `[patch.crates-io]` の両方の手順を書きました。配布の形は、短期的には両方を併記して公開することにしました (判断事項 3)。リポジトリは `https://github.com/matarillo/slint-wuc` に決めました (2026-11-19)。WUC は Windows.UI.Composition の略で、README の冒頭に書いています。
   - README の末尾に、フォークを開発する人向けの節を置きました。`reference/slint-1.19.0` の用意の仕方 (上流のタグ `v1.19.0` の clone。タグは実在を確認) と、それがないと失敗するものを書いています。アプリを作る人には `reference/` は要りません。
   - facade に、上流の feature のうち、バックエンド、レンダラー、プラットフォームの選択に当たるもの (30 個) を、何もしない feature として足しました。`image-pixel-format-rgb565` と `image-pixel-format-gray8` は core に渡します。独自の API を持つ feature (`unstable-*`、`live-preview`、`system-testing`) は足していません。足すと、ビルドが途中で「項目がない」と失敗し、原因が分かりにくくなるためです。今は Cargo が「その feature はない」と止めます。
   - `slint!` は、crates.io の `slint-macros = "=1.19.0"` を上流と同じく `pub use slint_macros::slint;` で再輸出しています。上流の facade も `slint-macros` を常に依存に持つので、その点も同じです。
@@ -427,7 +427,7 @@ README には両方を書けます。crates.io への公開は、ライブラリ
 1. フォーク独自の API をどこまで認めるか。facade だけに `slint::windows` のような拡張を足すか、HWND とサンプルにとどめるか。Mica、タイトルバー、ハイコントラストのすべてに関わる。考え方は「フォーク独自の拡張の考え方」を参照。
 2. 見せる相手は Rust の開発者だけか、C++ の開発者も含むか。
 3. 配布の形 (git の依存、別名での crates.io 公開、patch の手順だけ) とライセンスの表記。README の内容が決まる。考え方は「配布の形の考え方」を参照。
-   - 短期は決定済み (2026-11-19): git の依存と patch を両立する形で公開、配布する。README に両方を書いた。
+   - 短期は決定済み (2026-11-19): git の依存と patch を両立する形で公開、配布する。README に両方を書いた。リポジトリは `matarillo/slint-wuc`。crates.io に別名で公開するなら、名前は `slint-wuc` にそろえられる (「slint」を含むので商標の確認は要る)。
    - 長期の形 (別名での crates.io 公開をするか) と、ライセンスの表記のうち、フォークで変えた部分の著作権者と、Royalty-free 2.0 を派生物の利用者にそのまま適用できるかは、まだ決めていない。
 4. 最低 OS をビルド 22000 のままにするか、上げるか。Mica の公開 API は 22621 以降。考え方は「最低 OS の考え方」を参照。
 5. マルチモニターの検証に、仮想ディスプレイドライバーを入れてよいか (管理者権限が要る)。

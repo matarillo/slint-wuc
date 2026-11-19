@@ -1,7 +1,8 @@
-# Slint on Windows.UI.Composition
+# slint-wuc
 
-A fork of [Slint](https://slint.dev) 1.19 whose runtime shows the user interface with
-Windows.UI.Composition on Win32, instead of upstream's backends and renderers.
+Slint on Windows.UI.Composition (WUC): a fork of [Slint](https://slint.dev) 1.19 whose runtime
+shows the user interface with Windows.UI.Composition on Win32, instead of upstream's backends and
+renderers.
 
 This is a derivative of Slint, not Slint itself. Report problems with it here, not to the Slint
 project.
@@ -21,7 +22,7 @@ Use the fork's `slint` in place of upstream's, in either of two ways. Both fetch
 
 ```toml
 [dependencies]
-slint = { git = "https://github.com/<owner>/<repo>", rev = "<commit>" }
+slint = { git = "https://github.com/matarillo/slint-wuc", rev = "<commit>" }
 
 [build-dependencies]
 slint-build = "=1.19.0"
@@ -39,7 +40,7 @@ slint = "1.19"
 slint-build = "=1.19.0"
 
 [patch.crates-io]
-slint = { git = "https://github.com/<owner>/<repo>", rev = "<commit>" }
+slint = { git = "https://github.com/matarillo/slint-wuc", rev = "<commit>" }
 ```
 
 To go back to upstream, remove `[patch.crates-io]`.
