@@ -100,6 +100,10 @@ In both ways:
   builds on upstream as `upstream-backdrop` in `tools/upstream-gallery`.
 - Popup menus (context menus, the menu bar's drop-downs, the tray's menu) are dark when the color
   scheme is dark. Upstream's stay light.
+- A `DropArea` takes files and text that other programs drag onto the window, such as files from
+  Explorer, as upstream's Qt backend does. Upstream's winit backend takes none. Without a
+  modifier key, the proposed action is copy, also as on Qt. Dragging out of the window to other
+  programs isn't supported, as on upstream's winit backend.
 
 ## Developing the fork
 

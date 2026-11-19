@@ -196,7 +196,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - フォーク上での自作アプリ (slokk-slint) の確認。フェーズ中の確認対象にはしない (Phase 6 で決定)。
 - IMM32 から TSF への移行。IME の窓口は `crates/core/host/ime.rs` に閉じてあり、フォーカス移動時の扱いは TSF に合わせてある (`docs/design/input.md`)。再変換 (`IMR_RECONVERTSTRING`) も TSF 移行時に扱う。
 - Mica などの Windows 固有の機能。上流に API がないため、方式の確認だけ済ませてある (Phase 5)。2026-11-19 に、MenuBar のない窓にはリダイレクション面を付けないようにし、背景が透明な窓で Mica が出ることを確かめた (`docs/recommendations-after-phase7.md` の「3. Mica」)。
-- OLE によるアプリ間のドラッグ&ドロップ (`start_drag`、`IDropTarget`)。上流の winit にもない (Phase 6 で決定)。
+- OLE によるアプリ間のドラッグ&ドロップ (`start_drag`、`IDropTarget`)。上流の winit にもない (Phase 6 で決定)。受け側 (`IDropTarget`) は 2026-11-20 に作った (`docs/design/windows.md` の「Drag and Drop」)。送り側 (`start_drag`) は残る。
 
 ### 検証の持ち越し
 - マルチモニター DPI。倍率の異なるモニター間のドラッグ (Phase 1 から) と、同じモニターでの倍率の変更は、2026-11-19 に別のマシンで確かめた (論理サイズが保たれる。`docs/recommendations-after-phase7.md` の「5. マルチモニター DPI」)。IME とポップアップ (コンボボックスの一覧、ツールチップ、`PopupWindow`、ネイティブのコンテキストメニュー) も同じ日に確かめた。倍率の変化のあとにメニューバーの下の線が黒くなる問題 (上流でも出る) は直し、確かめた。

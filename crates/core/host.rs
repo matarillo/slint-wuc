@@ -53,6 +53,7 @@ use windows::core::{HSTRING, Interface, w};
 #[cfg(feature = "accessibility")]
 mod accesskit;
 mod bitmap;
+mod drop;
 mod frame;
 mod ime;
 mod input;
@@ -368,9 +369,18 @@ fn write_clipboard_text(owner: HWND, text: &str) -> windows::core::Result<()> {
 fn read_clipboard_text(owner: HWND) -> Option<alloc::string::String> {
     unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) }.ok()?;
     let _clipboard = open_clipboard(owner).ok()?;
+    let handle = unsafe { GetClipboardData(CF_UNICODETEXT) }.ok()?;
+    // SAFETY: the clipboard holds `CF_UNICODETEXT` in global memory, and keeps it while it's open.
+    unsafe { text_from_global(HGLOBAL(handle.0)) }
+}
+
+/// The `CF_UNICODETEXT` text in `memory`, with `\n` line breaks.
+///
+/// # Safety
+///
+/// `memory` is a global memory block that nothing frees while this runs.
+unsafe fn text_from_global(memory: HGLOBAL) -> Option<alloc::string::String> {
     unsafe {
-        let handle = GetClipboardData(CF_UNICODETEXT).ok()?;
-        let memory = HGLOBAL(handle.0);
         let source = GlobalLock(memory) as *const u16;
         if source.is_null() {
             return None;
@@ -534,6 +544,8 @@ pub struct Win32WindowAdapter {
     frame: frame::Frame,
     menu_bar: menu::MenuBar,
     context_menu: RefCell<Option<menu::PendingContextMenu>>,
+    /// What takes the drops from other programs, once a top-level window's HWND has it.
+    drop_target: RefCell<Option<windows::Win32::System::Ole::IDropTarget>>,
     #[cfg(feature = "accessibility")]
     accesskit: core::cell::OnceCell<accesskit::AccessKit>,
 }
@@ -602,6 +614,7 @@ impl Win32WindowAdapter {
             frame: Default::default(),
             menu_bar: menu::MenuBar::new(weak.clone()),
             context_menu: Default::default(),
+            drop_target: Default::default(),
             #[cfg(feature = "accessibility")]
             accesskit: Default::default(),
         }))
@@ -763,6 +776,7 @@ impl Win32WindowAdapter {
         let _ = self.accesskit.set(accesskit::AccessKit::new(self.self_weak.clone(), hwnd));
         ime::window_created(hwnd);
         if self.popup.is_none() {
+            *self.drop_target.borrow_mut() = drop::register(self, hwnd);
             self.frame.created(hwnd);
             if let Some(item) = self.inner().window_item() {
                 self.frame.set_icon(hwnd, &item.as_pin_ref().icon());
@@ -803,6 +817,12 @@ impl Win32WindowAdapter {
         if let Some(hwnd) = self.hwnd.get() {
             pointer::dispatch(self, hwnd, message);
         }
+    }
+
+    /// What takes the drops from other programs: tests call it as OLE would, without the mouse.
+    #[doc(hidden)]
+    pub fn drop_target_for_testing(&self) -> Option<windows::Win32::System::Ole::IDropTarget> {
+        self.drop_target.borrow().clone()
     }
 
     /// The cursor that the window last asked for.
@@ -1427,6 +1447,10 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Win32WindowAdapter;
     if ptr.is_null() {
         return unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+    }
+    if msg == WM_DESTROY {
+        // Before the adapter, which may be going away already, would be looked for.
+        drop::revoke(hwnd);
     }
     if msg == WM_NCDESTROY {
         // SAFETY: the pointer came from `Weak::into_raw` in `ensure_hwnd`.

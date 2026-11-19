@@ -63,6 +63,10 @@ path = "src/mica.rs"
 name = "probe-perf"
 path = "src/perf.rs"
 
+[[bin]]
+name = "probe-drop"
+path = "src/drop.rs"
+
 [dependencies]
 # `mcp` starts the MCP server when `SLINT_MCP_PORT` is set, for `tools/ui-check`.
 # `raw-window-handle-06`: for `probe-mica`, the HWND, as an application gets it from upstream.

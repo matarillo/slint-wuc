@@ -1,0 +1,61 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// A drop area for drags from other programs, for `probe-drop`: Explorer's files, an editor's text.
+
+import { CheckBox, VerticalBox } from "std-widgets.slint";
+
+export component DropProbe inherits Window {
+    title: "Drop files or text here";
+    preferred-width: 560px;
+    preferred-height: 420px;
+    // What a drag carries, as text; the probe reads the data transfer.
+    callback describe(data: data-transfer) -> string;
+    // Prints what a drop delivered.
+    callback report(text: string);
+    in-out property <bool> accept: true;
+    in-out property <string> hovered;
+    in-out property <string> log;
+
+    function action-name(action: DragAction) -> string {
+        action == DragAction.copy ? "copy" : action == DragAction.move ? "move"
+            : action == DragAction.link ? "link" : "none"
+    }
+
+    VerticalBox {
+        CheckBox {
+            text: "Accept drags (with the proposed action)";
+            checked <=> root.accept;
+        }
+        Rectangle {
+            border-width: 2px;
+            border-radius: 8px;
+            border-color: area.has-drag ? #2060c0 : #808080;
+            background: area.has-drag ? #2060c040 : transparent;
+            area := DropArea {
+                can-drop(event) => {
+                    root.hovered = "proposed " + root.action-name(event.proposed-action)
+                        + " at (" + round(event.position.x / 1px) + ", " + round(event.position.y / 1px) + ")\n"
+                        + root.describe(event.data);
+                    return root.accept ? event.proposed-action : DragAction.none;
+                }
+                dropped(event) => {
+                    root.log = "dropped with " + root.action-name(event.proposed-action)
+                        + " at (" + round(event.position.x / 1px) + ", " + round(event.position.y / 1px) + ")\n"
+                        + root.describe(event.data);
+                    root.report(root.log);
+                    return event.proposed-action;
+                }
+            }
+            Text {
+                x: 12px;
+                y: 12px;
+                width: parent.width - 24px;
+                wrap: word-wrap;
+                text: area.has-drag
+                    ? "current action: " + root.action-name(area.current-action) + "\n" + root.hovered
+                    : root.log == "" ? "Drag files from Explorer, or text from an editor, onto this area." : root.log;
+            }
+        }
+    }
+}

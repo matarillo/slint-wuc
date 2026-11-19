@@ -1,0 +1,38 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// A drop area in the top left corner, which records the drags that reach it.
+export component DropTest inherits Window {
+    width: 200px;
+    height: 200px;
+    // What a drag carries, as text; the test reads the data transfer.
+    callback describe(data: data-transfer) -> string;
+    // Whether the area takes drags, with the action that the drag proposes.
+    in property <bool> accept: true;
+    out property <bool> has-drag: area.has-drag;
+    in-out property <string> proposed;
+    in-out property <string> hovered;
+    in-out property <string> dropped;
+    in-out property <length> drop-x;
+    in-out property <length> drop-y;
+
+    area := DropArea {
+        x: 0;
+        y: 0;
+        width: 100px;
+        height: 100px;
+        can-drop(event) => {
+            root.proposed = event.proposed-action == DragAction.copy ? "copy"
+                : event.proposed-action == DragAction.move ? "move"
+                : event.proposed-action == DragAction.link ? "link" : "none";
+            root.hovered = root.describe(event.data);
+            return root.accept ? event.proposed-action : DragAction.none;
+        }
+        dropped(event) => {
+            root.dropped = root.describe(event.data);
+            root.drop-x = event.position.x;
+            root.drop-y = event.position.y;
+            return event.proposed-action;
+        }
+    }
+}

@@ -157,4 +157,21 @@ Its message-only window gets its messages from the host's message loop.
 ## Drag and Drop
 
 As upstream's winit backend, the host doesn't start native drags: `start_drag` returns `false`, and the core drags inside the window.
-Drag and drop between applications through OLE comes after Phase 7.
+
+A `DropArea` takes drags from other programs, as upstream's Qt backend delivers them (`crates/core/host/drop.rs`); upstream's winit backend takes none.
+- Each top-level window registers an OLE drop target (`RegisterDragDrop`) when its HWND is created, and revokes it on `WM_DESTROY`. Popups take no drops.
+- OLE is initialized (`OleInitialize`) on the UI thread the first time a window registers, and never uninitialized, as the Windows Runtime isn't.
+  `RoInitialize(RO_INIT_SINGLETHREADED)` made the thread single-threaded already, which OLE accepts (`tests/input/tests/drop.rs` checks that the target registers).
+  On a thread that the application made multithreaded, OLE fails; the failure is logged with `debug_log` and the windows take no drops.
+- `DragEnter`, `DragOver`, `Drop` and `DragLeave` become `BackendDragEvent::Move`, `Drop` and `Leave` through `WindowInner::process_drag_event`.
+  The point arrives on the screen; it converts to the client area as mouse messages do.
+- The data is read once, when the drag enters: `CF_HDROP` becomes the file paths of the `DataTransfer` (`DragQueryFileW`), and `CF_UNICODETEXT` its plain text, with `\n` line breaks, as the clipboard's.
+  Images (`CF_DIB`, PNG) and other formats aren't read yet.
+- The effects that the source allows (`*pdwEffect`) become the allowed actions, and the action that the `DropArea` under the point chose goes back as the effect; none gives `DROPEFFECT_NONE`.
+- The proposed action follows Qt's for drags from other programs (`QPlatformDrag::defaultAction`): Ctrl+Shift links, Ctrl copies, Shift moves, Alt links, and no key copies; what the source doesn't allow falls back to copy, move and link.
+  A drag inside the window proposes a move first. One from Explorer doesn't: when the target answers `DROPEFFECT_MOVE`, Explorer deletes the files after the drop (an unoptimized move, in the Shell's documentation; not tried).
+- The host doesn't set `CFSTR_PERFORMEDDROPEFFECT`: the source learns the effect only from what `Drop` answers.
+- Windows blocks drags from a program at a lower integrity level (UIPI): an elevated application takes no drops from Explorer.
+- The cursor during the drag is the source's (`IDropSource::GiveFeedback`), from the effect that the window answers.
+- `tests/input/tests/drop.rs` calls the drop target as OLE does, with a data object of its own (`Win32WindowAdapter::drop_target_for_testing`), so no mouse moves.
+  `probe-drop` shows what a real drag from Explorer or an editor delivers.
