@@ -33,6 +33,7 @@ pub(super) fn apply(window: &crate::api::Window, hwnd: HWND, dark_title_bar: &Ce
     context.set_accent_color(accent_color());
 
     let dark = scheme == ColorScheme::Dark;
+    set_menu_mode(dark);
     let previous = dark_title_bar.replace(Some(dark));
     if previous == Some(dark) {
         return;
@@ -63,6 +64,52 @@ pub(super) fn apply(window: &crate::api::Window, hwnd: HWND, dark_title_bar: &Ce
             );
         }
     }
+}
+
+/// Gives the process's popup menus (context menus, the menu bar's drop-downs, the tray's
+/// menu) the color scheme. Windows draws them light whatever the app mode, unless the process
+/// opts in through uxtheme's undocumented `SetPreferredAppMode` (ordinal 135), which
+/// `FlushMenuThemes` (ordinal 136) applies to the menus. A light scheme goes back to the
+/// default mode, which high contrast themes also take.
+fn set_menu_mode(dark: bool) {
+    use core::sync::atomic::{AtomicU8, Ordering};
+    const DEFAULT: i32 = 0;
+    const FORCE_DARK: i32 = 2;
+
+    // 0: not set yet, otherwise the mode plus one.
+    static APPLIED: AtomicU8 = AtomicU8::new(0);
+    let mode = if dark { FORCE_DARK } else { DEFAULT };
+    if APPLIED.swap(mode as u8 + 1, Ordering::Relaxed) == mode as u8 + 1 {
+        return;
+    }
+    if let Some((set, flush)) = menu_mode_functions() {
+        unsafe {
+            set(mode);
+            flush();
+        }
+    }
+}
+
+type SetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
+type FlushMenuThemes = unsafe extern "system" fn();
+
+/// uxtheme's `SetPreferredAppMode` and `FlushMenuThemes`, found by ordinal.
+fn menu_mode_functions() -> Option<(SetPreferredAppMode, FlushMenuThemes)> {
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    use windows::core::PCSTR;
+
+    static FUNCTIONS: std::sync::OnceLock<Option<(SetPreferredAppMode, FlushMenuThemes)>> =
+        std::sync::OnceLock::new();
+    *FUNCTIONS.get_or_init(|| unsafe {
+        let module = LoadLibraryW(w!("uxtheme.dll")).ok()?;
+        let set = GetProcAddress(module, PCSTR(135 as *const u8))?;
+        let flush = GetProcAddress(module, PCSTR(136 as *const u8))?;
+        type Proc = unsafe extern "system" fn() -> isize;
+        Some((
+            core::mem::transmute::<Proc, SetPreferredAppMode>(set),
+            core::mem::transmute::<Proc, FlushMenuThemes>(flush),
+        ))
+    })
 }
 
 /// Dark when the apps' mode is dark, unless a high contrast theme is on, as winit decides.
@@ -111,4 +158,15 @@ fn accent_color() -> Color {
     }
     let [r, g, b, _] = unsafe { GetSysColor(COLOR_HIGHLIGHT) }.to_le_bytes();
     Color::from_argb_u8(255, r, g, b)
+}
+
+#[cfg(test)]
+mod tests {
+    /// The undocumented functions are found by ordinal on the supported builds.
+    #[test]
+    fn the_menu_mode_functions_load() {
+        assert!(super::menu_mode_functions().is_some());
+        super::set_menu_mode(true);
+        super::set_menu_mode(false);
+    }
 }

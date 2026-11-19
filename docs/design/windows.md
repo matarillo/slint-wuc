@@ -64,6 +64,11 @@ As upstream's winit backend does on Windows with `muda`:
   - Keeping the surface and calling `DwmEnableBlurBehindWindow` with an empty region, as winit does, didn't make it transparent, nor did a black class brush on top of that (2026-11-19). Why wasn't found.
 - Windows draws a menu bar light whatever the color scheme.
   When the scheme is dark, the host draws the bar on the undocumented `WM_UAHDRAWMENU` and `WM_UAHDRAWMENUITEM` messages, in `muda`'s colors.
+- Windows also draws popup menus light (context menus, the bar's drop-downs, the tray's menu), unless the process opts in.
+  When the scheme is dark, the host calls uxtheme's undocumented `SetPreferredAppMode` (ordinal 135) with `ForceDark`, then `FlushMenuThemes` (ordinal 136); when it's light, `Default` (`host/theme.rs`).
+  The mode is process-wide and follows the host's color scheme, so a high contrast theme gets the default mode.
+  Upstream's winit and `muda` don't call it, so upstream's popup menus stay light in dark mode.
+  Checked on build 26200 by opening a popup menu in a process forced to dark: Windows 11's dark menu (`#2C2C2C`), with the check mark and the disabled entry drawn for it.
 - `SLINT_NO_MUDA` turns both off, as upstream does, and the core draws the menus in popups instead.
 - A detached window has no native menus, as upstream's testing backend.
 

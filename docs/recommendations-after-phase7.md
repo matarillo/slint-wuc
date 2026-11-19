@@ -466,6 +466,7 @@ README には両方を書けます。crates.io への公開は、ライブラリ
 
 - ダークモードでのネイティブのコンテキストメニュー: `TrackPopupMenuEx` のメニューは、uxtheme の非公開の関数 (`SetPreferredAppMode`) を呼ばないと、ダークモードでも明るいまま出るはずです【推測】。フォークはその関数を呼んでいません【確認】。
   - ダークモードを見せる絵で白いメニューが出ると、目立ちます。まず確かめます (S)。メニューバーは、ダークのときにホストが描いています【確認】。
+  - 2026-11-19 に直しました。ホストは、カラースキームがダークのとき `SetPreferredAppMode(ForceDark)` と `FlushMenuThemes` を呼びます (`host/theme.rs`、`docs/design/windows.md` の Menus)。プロセスを強制的にダークにしてポップアップメニューを開くと、Windows 11 のダークのメニュー (`#2C2C2C`) になることを、自分の窓のキャプチャで確かめました【確認】。システムをダークにしたときのフォークの見た目は、オーナーの確認が要ります (開発機はライトモード)。上流の winit と `muda` はこの関数を呼ばないので、上流ではダークでも明るいままのはずです【推測】。
 - Slint 描画のポップアップ (コンボボックスの一覧、`PopupWindow`) は、それぞれ独自の HWND と、透明な合成ターゲットを持ちます【確認、`docs/design/windows.md` の Popups】。
   - Windows 11 のフライアウトは Acrylic (`DWMSBT_TRANSIENTWINDOW`) です。ポップアップの HWND に Acrylic を敷けるはずです【推測】。
   - 上流の winit は、ポップアップを窓の中に描くので、これはできません。差を示せます。
