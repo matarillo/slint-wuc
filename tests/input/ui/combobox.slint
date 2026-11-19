@@ -1,0 +1,23 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// Upstream's combo box, whose list is a popup that takes the keys, for a UI Automation client.
+import { ComboBox } from "std-widgets.slint";
+
+export component ComboBoxTest inherits Window {
+    width: 200px;
+    height: 200px;
+    title: "Combo";
+    out property <int> current: box.current-index;
+
+    box := ComboBox {
+        x: 0;
+        y: 0;
+        width: 150px;
+        model: ["One", "Two", "Three"];
+    }
+
+    public function focus-box() {
+        box.focus();
+    }
+}

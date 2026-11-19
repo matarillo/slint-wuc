@@ -16,13 +16,14 @@ use std::sync::{Mutex, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{LPARAM, WPARAM};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
 };
 use windows::Win32::UI::Accessibility::*;
-use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VK_DOWN, VK_RETURN};
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{Ref, implement};
+use windows::core::{Interface, Ref, implement};
 
 slint::include_modules!();
 
@@ -180,42 +181,66 @@ fn the_client_sees_changes() {
     assert_eq!(toggle_state(&f), ToggleState_On);
 }
 
-/// A focus event that a client got: the element that has the focus.
+/// What a client heard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Heard {
+    Focus,
+    Selected,
+}
+
+/// An event that a client got, with what it reads of the element it's about.
 #[derive(Clone, Debug)]
-struct FocusEvent {
+struct Event {
+    heard: Heard,
     name: String,
     has_keyboard_focus: bool,
 }
 
-#[implement(IUIAutomationFocusChangedEventHandler)]
-struct FocusHandler {
-    events: Mutex<mpsc::Sender<FocusEvent>>,
+impl Event {
+    fn of(heard: Heard, element: &IUIAutomationElement) -> Self {
+        let name = unsafe { element.CurrentName() }.map(|n| n.to_string()).unwrap_or_default();
+        let has_keyboard_focus =
+            unsafe { element.CurrentHasKeyboardFocus() }.is_ok_and(|focus| focus.as_bool());
+        Self { heard, name, has_keyboard_focus }
+    }
 }
 
-impl IUIAutomationFocusChangedEventHandler_Impl for FocusHandler_Impl {
+#[implement(IUIAutomationFocusChangedEventHandler, IUIAutomationEventHandler)]
+struct Handler {
+    events: Mutex<mpsc::Sender<Event>>,
+}
+
+impl IUIAutomationFocusChangedEventHandler_Impl for Handler_Impl {
     fn HandleFocusChangedEvent(
         &self,
         sender: Ref<IUIAutomationElement>,
     ) -> windows::core::Result<()> {
-        let element = sender.ok()?;
-        let name = unsafe { element.CurrentName() }.map(|n| n.to_string()).unwrap_or_default();
-        let has_keyboard_focus =
-            unsafe { element.CurrentHasKeyboardFocus() }.is_ok_and(|focus| focus.as_bool());
-        let _ = self.events.lock().unwrap().send(FocusEvent { name, has_keyboard_focus });
+        let _ = self.events.lock().unwrap().send(Event::of(Heard::Focus, sender.ok()?));
         Ok(())
     }
 }
 
-/// A client that listens for the focus events of the whole desktop, as a screen reader does,
-/// on a thread of its own.
-struct FocusEvents {
-    events: mpsc::Receiver<FocusEvent>,
-    stop: mpsc::Sender<()>,
-    thread: JoinHandle<()>,
-    seen: Vec<FocusEvent>,
+impl IUIAutomationEventHandler_Impl for Handler_Impl {
+    fn HandleAutomationEvent(
+        &self,
+        sender: Ref<IUIAutomationElement>,
+        _: UIA_EVENT_ID,
+    ) -> windows::core::Result<()> {
+        let _ = self.events.lock().unwrap().send(Event::of(Heard::Selected, sender.ok()?));
+        Ok(())
+    }
 }
 
-impl FocusEvents {
+/// A client that listens for the focus events and the selection events of the whole desktop,
+/// as a screen reader does, on a thread of its own.
+struct Events {
+    events: mpsc::Receiver<Event>,
+    stop: mpsc::Sender<()>,
+    thread: JoinHandle<()>,
+    seen: Vec<Event>,
+}
+
+impl Events {
     fn listen() -> Self {
         let (sender, events) = mpsc::channel();
         let (stop, stopped) = mpsc::channel::<()>();
@@ -224,9 +249,22 @@ impl FocusEvents {
             unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok().unwrap() };
             let automation: IUIAutomation =
                 unsafe { CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }.unwrap();
-            let handler: IUIAutomationFocusChangedEventHandler =
-                FocusHandler { events: Mutex::new(sender) }.into();
-            unsafe { automation.AddFocusChangedEventHandler(None, &handler) }.unwrap();
+            let handler = Handler { events: Mutex::new(sender) };
+            let focus: IUIAutomationFocusChangedEventHandler = handler.into();
+            let selected: IUIAutomationEventHandler = focus.cast().unwrap();
+            unsafe {
+                automation.AddFocusChangedEventHandler(None, &focus).unwrap();
+                let root = automation.GetRootElement().unwrap();
+                automation
+                    .AddAutomationEventHandler(
+                        UIA_SelectionItem_ElementSelectedEventId,
+                        &root,
+                        TreeScope_Subtree,
+                        None,
+                        &selected,
+                    )
+                    .unwrap();
+            }
             let _ = ready.send(());
             let _ = stopped.recv();
             unsafe { automation.RemoveAllEventHandlers() }.unwrap();
@@ -235,19 +273,28 @@ impl FocusEvents {
         Self { events, stop, thread, seen: Vec::new() }
     }
 
-    /// The first focus event on an element named `name` from now on, while this thread
+    /// The first event of `heard` on an element named `name` from now on, while this thread
     /// handles the window's messages.
-    fn wait_for(&mut self, name: &str) -> FocusEvent {
+    fn wait_for(&mut self, heard: Heard, name: &str) -> Event {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             pump_messages();
             while let Ok(event) = self.events.try_recv() {
                 self.seen.push(event.clone());
-                if event.name == name {
+                if event.heard == heard && event.name == name {
                     return event;
                 }
             }
-            assert!(Instant::now() < deadline, "no focus event on {name}: {:?}", self.seen);
+            assert!(Instant::now() < deadline, "no {heard:?} on {name}: {:?}", self.seen);
+        }
+    }
+
+    /// Handles the window's messages for `duration`, and keeps the events that came.
+    fn settle(&mut self, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        while Instant::now() < deadline {
+            pump_messages();
+            self.seen.extend(self.events.try_iter());
         }
     }
 
@@ -264,18 +311,48 @@ impl FocusEvents {
 /// the client hears that the focus moves into it, and back when it closes.
 fn the_focus_follows_a_popup_that_gets_the_keys() {
     let f = Fixture::new();
-    let mut events = FocusEvents::listen();
+    let mut events = Events::listen();
     unsafe { SetFocus(Some(f.hwnd)) }.unwrap();
     f.ui.invoke_focus_field();
-    events.wait_for("Field");
+    events.wait_for(Heard::Focus, "Field");
 
     f.ui.invoke_open_popup();
-    let choice = events.wait_for("Choice");
+    let choice = events.wait_for(Heard::Focus, "Choice");
     assert!(choice.has_keyboard_focus, "{choice:?}");
 
     f.ui.invoke_close_popup();
-    let field = events.wait_for("Field");
+    let field = events.wait_for(Heard::Focus, "Field");
     assert!(field.has_keyboard_focus, "{field:?}");
+    events.stop();
+}
+
+/// Sends a key press and release to `hwnd`: a virtual key and its scan code.
+fn press(hwnd: HWND, vk: u16, scan: u32, extended: bool) {
+    let lp = 1 | (scan << 16) | if extended { 1 << 24 } else { 0 };
+    unsafe {
+        SendMessageW(hwnd, WM_KEYDOWN, Some(WPARAM(vk as usize)), Some(LPARAM(lp as isize)));
+        let up = lp | (1 << 30) | (1 << 31);
+        SendMessageW(hwnd, WM_KEYUP, Some(WPARAM(vk as usize)), Some(LPARAM(up as isize)));
+    }
+}
+
+/// The list of upstream's combo box keeps the focus on itself and selects its items with the
+/// arrow keys: the client hears the selection, from the list's popup.
+fn the_combo_box_list_tells_its_selection() {
+    let ui = ComboBoxTest::new().unwrap();
+    let hwnd =
+        Win32WindowAdapter::from_window(ui.window()).unwrap().create_hwnd_for_testing().unwrap();
+    let mut events = Events::listen();
+    unsafe { SetFocus(Some(hwnd)) }.unwrap();
+    ui.invoke_focus_box();
+    // AccessKit raises the selection events of a tree that a client asked for: give the client
+    // time to ask for the window's tree, and for the popup's once it opens.
+    events.settle(Duration::from_millis(500));
+    press(hwnd, VK_RETURN.0, 0x1c, false);
+    events.settle(Duration::from_millis(500));
+    press(hwnd, VK_DOWN.0, 0x50, true);
+    events.wait_for(Heard::Selected, "Two");
+    assert_eq!(ui.get_current(), 1);
     events.stop();
 }
 
@@ -285,4 +362,5 @@ fn ui_automation() {
     invoking_a_button_runs_its_action();
     the_client_sees_changes();
     the_focus_follows_a_popup_that_gets_the_keys();
+    the_combo_box_list_tells_its_selection();
 }
