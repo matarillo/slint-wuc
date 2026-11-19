@@ -667,6 +667,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-titlebar"
+version = "0.0.0"
+dependencies = [
+ "raw-window-handle",
+ "slint",
+ "windows",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

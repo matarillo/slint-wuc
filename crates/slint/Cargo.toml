@@ -33,14 +33,19 @@ gettext = ["i-slint-core/gettext-rs"]
 raw-window-handle-06 = ["dep:raw-window-handle-06", "i-slint-core/raw-window-handle-06"]
 # Starts the MCP server when the `SLINT_MCP_PORT` environment variable is set.
 mcp = ["dep:i-slint-backend-testing", "i-slint-backend-testing/mcp"]
+# Fork only: `slint::wuc`, what Slint's API has no place for on this runtime, such as extending
+# a window's content into its title bar. Unstable, and absent from upstream, so code that uses
+# it doesn't build there.
+unstable-wuc = []
 image-pixel-format-rgb565 = ["i-slint-core/image-pixel-format-rgb565"]
 image-pixel-format-gray8 = ["i-slint-core/image-pixel-format-gray8"]
 
 # Upstream's features that choose a backend, a renderer or a platform option. They do nothing
 # here: the runtime has one host and one renderer, Windows.UI.Composition. They are accepted so
 # that `Cargo.toml` files written for upstream Slint build unchanged.
-# Features that expose an API of their own (`unstable-*`, `live-preview`, `system-testing`) are
-# left out, so that Cargo names them instead of the build failing on a missing item.
+# Upstream's features that expose an API of their own (`unstable-*`, `live-preview`,
+# `system-testing`) are left out, so that Cargo names them instead of the build failing on a
+# missing item.
 backend-default = []
 backend-qt = []
 backend-winit = []

@@ -1,0 +1,14 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// A window with a move area over its title bar, whose height the test sets from the title bar's.
+export component TitleBarTest inherits Window {
+    in property <length> title-bar-height;
+    preferred-width: 400px;
+    preferred-height: 300px;
+
+    WindowMoveArea {
+        y: 0;
+        height: root.title-bar-height;
+    }
+}

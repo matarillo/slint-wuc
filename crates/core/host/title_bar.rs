@@ -240,19 +240,20 @@ impl Win32WindowAdapter {
         let margin = self.margin();
         let dx = window.left - origin.x - margin.left;
         let dy = window.top - origin.y - margin.top;
+        // The client area's, since `WM_SIZE` measures before the content is resized.
+        let width = super::client_size(hwnd).width as i32 - margin.left - margin.right;
+        // DWM's bounds reach a pixel past the client area on the right (120 dpi).
         let (left, top) = (buttons.left + dx, buttons.top + dy);
-        let (right, bottom) = (buttons.right + dx, buttons.bottom + dy);
+        let (right, bottom) = ((buttons.right + dx).min(width), buttons.bottom + dy);
         let scale = self.window.scale_factor();
         let logical = |v: i32| v as f32 / scale;
         let buttons = LogicalRect::new(
             LogicalPoint::new(logical(left), logical(top)),
             LogicalSize::new(logical(right - left), logical(bottom - top)),
         );
-        // The client area's, since `WM_SIZE` measures before the content is resized.
-        let width = super::client_size(hwnd).width as i32 - margin.left - margin.right;
         let hole = LogicalRect::new(
             LogicalPoint::new(logical(left), 0.),
-            LogicalSize::new(logical(width.max(right) - left), logical(bottom)),
+            LogicalSize::new(logical(width - left), logical(bottom)),
         );
         Some((TitleBar { height: logical(bottom.max(0)), buttons }, hole))
     }

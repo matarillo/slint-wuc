@@ -62,9 +62,9 @@ In both ways:
 ## Compared with upstream
 
 - Upstream's features that choose a backend, a renderer or a platform option (`backend-winit`,
-  `renderer-skia`, `renderer-software`, ...) are accepted and do nothing. Features that bring an
-  API of their own (`unstable-*`, `live-preview`, `system-testing`) are absent, so Cargo reports
-  them.
+  `renderer-skia`, `renderer-software`, ...) are accepted and do nothing. Upstream's features
+  that bring an API of their own (`unstable-*`, `live-preview`, `system-testing`) are absent, so
+  Cargo reports them.
 - There is no backend or renderer selection, and an application can't install its own platform.
   `slint::platform` keeps only the types that the `Window` API uses.
 - `Window::window_handle()` gives the HWND, with the `raw-window-handle-06` feature as upstream.
@@ -99,6 +99,11 @@ In both ways:
   code that also runs on upstream sets the backdrop from a timer. `examples/backdrop` does, and
   switches between Mica, Mica Alt and Acrylic: `cargo run -p example-backdrop`. The same source
   builds on upstream as `upstream-backdrop` in `tools/upstream-gallery`.
+- The fork's own feature `unstable-wuc` adds `slint::wuc`, which upstream doesn't have, so code
+  that uses it doesn't build there. It extends a window's content into its title bar, as WinUI 3's
+  `ExtendsContentIntoTitleBar` does: DWM keeps drawing the caption buttons, a `WindowMoveArea` is
+  the drag region, and the application lays out the rest. The API may change in any release, and
+  isn't in `v1.19.0-wuc.1`. `examples/titlebar` shows it over Mica: `cargo run -p example-titlebar`.
 - Popup menus (context menus, the menu bar's drop-downs, the tray's menu) are dark when the color
   scheme is dark. Upstream's stay light.
 - A `DropArea` takes files and text that other programs drag onto the window, such as files from

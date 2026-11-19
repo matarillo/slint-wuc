@@ -1,0 +1,23 @@
+# Copyright © Kentaro Inomata
+# SPDX-License-Identifier: MIT-0
+
+[package]
+name = "example-titlebar"
+description = "Fluent widgets over Mica, with the content extended into the title bar (fork only)"
+authors.workspace = true
+edition = "2024"
+license = "MIT-0"
+publish = false
+rust-version.workspace = true
+version = "0.0.0"
+
+[[bin]]
+name = "titlebar"
+path = "src/main.rs"
+
+[dependencies]
+# `unstable-wuc`: the title bar API, which only the fork has. `raw-window-handle-06`:
+# `Window::window_handle()`, as in upstream.
+slint = { path = "../../crates/slint", features = ["raw-window-handle-06", "unstable-wuc"] }
+raw-window-handle = "0.6"
+windows = { workspace = true, features = ["Win32_Graphics_Dwm"] }
