@@ -199,7 +199,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - OLE によるアプリ間のドラッグ&ドロップ (`start_drag`、`IDropTarget`)。上流の winit にもない (Phase 6 で決定)。
 
 ### 検証の持ち越し
-- マルチモニター DPI。倍率の異なるモニター間のドラッグ (Phase 1 から) を含む。モニターがないため (`SLINT_FORK_TRACE_DPI` でメッセージを追える)。
+- マルチモニター DPI。倍率の異なるモニター間のドラッグ (Phase 1 から) と、同じモニターでの倍率の変更は、2026-11-19 に別のマシンで確かめた (論理サイズが保たれる。`docs/recommendations-after-phase7.md` の「5. マルチモニター DPI」)。ポップアップの移動先と IME の候補ウィンドウの位置が残る。
 - 仮想化しない長いリストで毎フレームテキストが変わる場合に、アトラスのページが残るか (Phase 7、`docs/design/visual-tree.md`)。
 
 ### 未実装・判断待ち
