@@ -8,18 +8,24 @@
 # of upstream's logo/, which some examples load through `../../logo`. Only its Cargo.toml changes,
 # from upstream's workspace paths to what an application outside the repository writes:
 #   -Form patch: `slint = "1.19"` from crates.io, replaced by `[patch.crates-io]`.
-#   -Form git:   `slint` from the fork directly; a path stands in for the git URL.
-# The script then checks in Cargo.lock that `slint` is the fork, not crates.io's.
+#   -Form git:   `slint` from the fork directly.
+# The fork is this clone's crates/slint, or with -Git <tag>, that tag on GitHub, as the README
+# writes it. The script then checks in Cargo.lock that `slint` is the fork, not crates.io's.
 #
-# Usage: tools/upstream-examples.ps1 [-Form patch,git] [-Examples memory,slide_puzzle,system-tray]
+# Usage: tools/upstream-examples.ps1 [-Form patch,git] [-Examples memory,slide_puzzle,system-tray] [-Git <tag>]
 # Run from PowerShell, where cargo finds the MSVC linker.
 param(
     [ValidateSet('patch', 'git')] [string[]] $Form = @('patch', 'git'),
-    [string[]] $Examples = @('memory', 'slide_puzzle', 'system-tray')
+    [string[]] $Examples = @('memory', 'slide_puzzle', 'system-tray'),
+    [string] $Git
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$fork = (Join-Path $repo 'crates/slint') -replace '\\', '/'
+$fork = if ($Git) {
+    "git = `"https://github.com/matarillo/slint-wuc`", tag = `"$Git`""
+} else {
+    "path = `"$((Join-Path $repo 'crates/slint') -replace '\\', '/')`""
+}
 $upstream = Join-Path $repo 'reference/slint-1.19.0'
 if (-not (Test-Path (Join-Path $upstream 'examples'))) {
     throw "Upstream's sources aren't in $upstream (reference/ isn't tracked). Get them with: " +
@@ -42,7 +48,7 @@ $results = foreach ($f in $Form) {
 
         $manifest = Join-Path $dir 'Cargo.toml'
         $toml = Get-Content -Raw $manifest
-        $slint = if ($f -eq 'patch') { 'version = "1.19"' } else { "path = `"$fork`"" }
+        $slint = if ($f -eq 'patch') { 'version = "1.19"' } else { $fork }
         $toml = $toml -replace 'slint = \{ path = "\.\./\.\./api/rs/slint"', "slint = { $slint"
         $toml = $toml -replace 'slint-build = \{ path = "\.\./\.\./api/rs/build" \}', 'slint-build = "=1.19.0"'
         $toml = $toml -replace 'edition\.workspace = true', 'edition = "2024"'
@@ -51,15 +57,15 @@ $results = foreach ($f in $Form) {
             throw "$e`: Cargo.toml still refers to upstream's workspace"
         }
         $toml += "`n[workspace]`n"
-        if ($f -eq 'patch') { $toml += "`n[patch.crates-io]`nslint = { path = `"$fork`" }`n" }
+        if ($f -eq 'patch') { $toml += "`n[patch.crates-io]`nslint = { $fork }`n" }
         Set-Content -NoNewline -Path $manifest -Value $toml
 
         $log = Join-Path $dir 'build.log'
         cargo build --manifest-path $manifest --target-dir (Join-Path $work 'target') *> $log
         $built = $LASTEXITCODE -eq 0
-        # A `slint` with a `source` line came from crates.io: the patch was not used.
+        # A `slint` from crates.io has a registry source: the patch was not used.
         $lock = if (Test-Path (Join-Path $dir 'Cargo.lock')) { Get-Content -Raw (Join-Path $dir 'Cargo.lock') } else { '' }
-        $fromFork = $lock -match '(?m)^name = "slint"\r?\nversion = "1\.19\.0"\r?\n(?!source)'
+        $fromFork = $lock -match '(?m)^name = "slint"\r?\nversion = "1\.19\.0"\r?\n(?!source = "registry)'
         [pscustomobject]@{
             form = $f; example = $e; built = $built; slintIsFork = $fromFork
             log = if ($built) { '' } else { $log }

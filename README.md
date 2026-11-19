@@ -22,7 +22,7 @@ Use the fork's `slint` in place of upstream's, in either of two ways. Both fetch
 
 ```toml
 [dependencies]
-slint = { git = "https://github.com/matarillo/slint-wuc", rev = "<commit>" }
+slint = { git = "https://github.com/matarillo/slint-wuc", tag = "v1.19.0-wuc.1" }
 
 [build-dependencies]
 slint-build = "=1.19.0"
@@ -40,7 +40,7 @@ slint = "1.19"
 slint-build = "=1.19.0"
 
 [patch.crates-io]
-slint = { git = "https://github.com/matarillo/slint-wuc", rev = "<commit>" }
+slint = { git = "https://github.com/matarillo/slint-wuc", tag = "v1.19.0-wuc.1" }
 ```
 
 To go back to upstream, remove `[patch.crates-io]`.
@@ -55,8 +55,9 @@ In both ways:
 - Write `slint-build` (or `slint-macros`, if you depend on it directly) as `"=1.19.0"`. The code
   it generates names the compiler's version, and the runtime matches 1.19.0 only. `"1.19"`
   picks the newest 1.x, and the build fails once upstream releases 1.20.
-- To try the fork before cloning it from a remote, use `path = "<clone>/crates/slint"` in place of
-  `git = ...`.
+- The tags name the upstream version the fork matches (`v1.19.0-wuc.N`). Pick a newer tag to
+  update, or `rev = "<commit>"` for a commit between tags.
+- To try a local clone, use `path = "<clone>/crates/slint"` in place of `git = ...`.
 
 ## Compared with upstream
 
