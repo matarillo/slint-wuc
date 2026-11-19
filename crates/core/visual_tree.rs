@@ -424,7 +424,8 @@ impl VisualUpdate<'_> {
     /// logical pixels, inside `radius`. The children aren't clipped.
     pub fn backdrop_blur(&mut self, sigma: f32, size: LogicalSize, radius: LogicalBorderRadius) {
         self.plain();
-        if !(sigma > 0.) {
+        // Also for NaN.
+        if sigma.is_nan() || sigma <= 0. {
             self.remove_floor();
             return;
         }

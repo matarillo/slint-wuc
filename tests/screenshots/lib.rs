@@ -187,7 +187,7 @@ fn report(case: &Case, snapshot: &SharedPixelBuffer<Rgba8Pixel>) {
     let line = match found {
         None => format!("{}\t{width}x{height}\t-\t-\t-\t-\tno reference\n", case.name),
         Some((renderer, path)) => {
-            let reference = load(&path).unwrap();
+            let reference = load(path).unwrap();
             if (reference.width(), reference.height()) != (width, height) {
                 format!(
                     "{}\t{width}x{height}\t-\t-\t-\t-\t{renderer} {}x{}\n",

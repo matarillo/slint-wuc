@@ -116,7 +116,7 @@ fn draw(
     let mut offset = POINT::default();
     let dc: ID2D1DeviceContext = unsafe { interop.BeginDraw(None, &mut offset)? };
     let base = Matrix3x2::translation(offset.x as f32, offset.y as f32);
-    let result = (|| unsafe {
+    let result = unsafe {
         dc.SetDpi(96., 96.);
         dc.SetTransform(&base);
         dc.Clear(Some(&D2D1_COLOR_F::default()));
@@ -125,7 +125,7 @@ fn draw(
         } else {
             draw_drop(&dc, base, options, scale)
         }
-    })();
+    };
     let end = unsafe { interop.EndDraw() };
     result.and(end)
 }

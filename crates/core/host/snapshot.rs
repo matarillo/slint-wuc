@@ -225,7 +225,7 @@ impl Capturer {
                     (mapped.pData as *const u8).add((y * mapped.RowPitch) as usize),
                     (width * 4) as usize,
                 );
-                for (x, bgra) in row.chunks_exact(4).enumerate() {
+                for (x, bgra) in row.as_chunks::<4>().0.iter().enumerate() {
                     out[(y * width) as usize + x] = unpremultiply(bgra);
                 }
             }
@@ -239,7 +239,7 @@ impl Capturer {
 }
 
 /// A captured premultiplied BGRA pixel as straight RGBA.
-fn unpremultiply(bgra: &[u8]) -> Rgba8Pixel {
+fn unpremultiply(bgra: &[u8; 4]) -> Rgba8Pixel {
     let a = bgra[3];
     let straight = |c: u8| match a {
         0 => 0,

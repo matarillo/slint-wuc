@@ -164,7 +164,8 @@ fn stroke_style(
     shape.SetStrokeBrush(brush)?;
     // Skia draws a stroke of width 0 as a line one pixel wide.
     let mut thickness = path.stroke_width().get() as f32;
-    if !(thickness > 0.) {
+    // Also for NaN.
+    if thickness.is_nan() || thickness <= 0. {
         let scale = item_rc
             .window_adapter()
             .map_or(1., |adapter| WindowInner::from_pub(adapter.window()).scale_factor());
@@ -249,7 +250,7 @@ fn d2d_stroke_style(path: Pin<&Path>, thickness: f32) -> windows::core::Result<I
 /// has an odd number of lengths, a negative length, or no length at all.
 fn dash_pattern(lengths: &[crate::Coord]) -> Option<&[crate::Coord]> {
     let valid = lengths.len() >= 2
-        && lengths.len() % 2 == 0
+        && lengths.len().is_multiple_of(2)
         && lengths.iter().all(|l| l.is_finite() && *l >= 0.)
         && lengths.iter().sum::<crate::Coord>() > 0.;
     valid.then_some(lengths)
@@ -298,6 +299,6 @@ fn geometry(
             }
         }
         sink.Close()?;
-        Ok((figures > 0).then(|| geometry.cast()).transpose()?)
+        (figures > 0).then(|| geometry.cast()).transpose()
     }
 }

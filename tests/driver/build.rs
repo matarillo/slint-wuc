@@ -239,7 +239,10 @@ fn process_case(testcase: &test_driver_lib::TestCase) -> std::io::Result<String>
         Path::new(&std::env::var_os("OUT_DIR").unwrap()).join(format!("{module_name}.rs")),
     )?);
 
-    output.write_all(b"#![deny(warnings)]\n#![deny(rust_2018_idioms)]\n#![deny(unsafe_code)]\n")?;
+    // Upstream's cases are written for upstream's clippy; the fork doesn't hold them to its own.
+    output.write_all(
+        b"#![deny(warnings)]\n#![deny(rust_2018_idioms)]\n#![deny(unsafe_code)]\n#![allow(clippy::all)]\n",
+    )?;
 
     if testcase.is_ignored("rust") {
         writeln!(
