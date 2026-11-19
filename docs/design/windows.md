@@ -64,6 +64,9 @@ As upstream's winit backend does on Windows with `muda`:
   - Keeping the surface and calling `DwmEnableBlurBehindWindow` with an empty region, as winit does, didn't make it transparent, nor did a black class brush on top of that (2026-11-19). Why wasn't found.
 - Windows draws a menu bar light whatever the color scheme.
   When the scheme is dark, the host draws the bar on the undocumented `WM_UAHDRAWMENU` and `WM_UAHDRAWMENUITEM` messages, in `muda`'s colors.
+- Below the bar, the default procedure draws a one pixel line, in `COLOR_3DFACE` (measured on build 26200).
+  Once the window's DPI changes, it stops drawing it, and the line shows the redirection surface's black; upstream's winit shows the same (2026-11-19, the owner, 125% and 200% monitors).
+  The host draws the line after the default procedure on `WM_NCPAINT` and `WM_NCACTIVATE`, in `COLOR_3DFACE`, or in the dark bar's color.
 - Windows also draws popup menus light (context menus, the bar's drop-downs, the tray's menu), unless the process opts in.
   When the scheme is dark, the host calls uxtheme's undocumented `SetPreferredAppMode` (ordinal 135) with `ForceDark`, then `FlushMenuThemes` (ordinal 136); when it's light, `Default` (`host/theme.rs`).
   The mode is process-wide and follows the host's color scheme, so a high contrast theme gets the default mode.

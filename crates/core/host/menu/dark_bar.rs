@@ -58,7 +58,7 @@ struct UahDrawMenuItem {
 /// procedure, over the line it leaves below the menu bar.
 pub(super) fn draw(hwnd: HWND, msg: u32, _wp: WPARAM, lp: LPARAM) {
     match msg {
-        WM_NCACTIVATE | WM_NCPAINT => draw_line_below_bar(hwnd),
+        WM_NCACTIVATE | WM_NCPAINT => draw_line_below_bar(hwnd, BACKGROUND),
         WM_UAHDRAWMENU => {
             // SAFETY: the message passes a `UAHMENU`.
             let menu = unsafe { &*(lp.0 as *const UahMenu) };
@@ -73,8 +73,8 @@ pub(super) fn draw(hwnd: HWND, msg: u32, _wp: WPARAM, lp: LPARAM) {
     }
 }
 
-/// Fills the one pixel line between the menu bar and the client area.
-fn draw_line_below_bar(hwnd: HWND) {
+/// Fills the one pixel line between the menu bar and the client area with `color`.
+pub(super) fn draw_line_below_bar(hwnd: HWND, color: COLORREF) {
     let mut client = RECT::default();
     let mut window = RECT::default();
     if unsafe { GetClientRect(hwnd, &mut client) }.is_err()
@@ -95,7 +95,7 @@ fn draw_line_below_bar(hwnd: HWND) {
     };
     unsafe {
         let hdc = GetWindowDC(Some(hwnd));
-        fill(hdc, &line, BACKGROUND);
+        fill(hdc, &line, color);
         ReleaseDC(Some(hwnd), hdc);
     }
 }

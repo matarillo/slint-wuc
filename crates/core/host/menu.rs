@@ -17,8 +17,10 @@ use alloc::vec::Vec;
 use core::cell::{Cell, RefCell};
 use core::pin::Pin;
 use vtable::{VRc, VWeak};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Graphics::Gdi::{ClientToScreen, DeleteObject, HBITMAP};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    COLOR_3DFACE, ClientToScreen, DeleteObject, GetSysColor, HBITMAP,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateMenu, CreatePopupMenu, DefWindowProcW, DestroyMenu, DrawMenuBar,
     GetMenuItemCount, HMENU, MENUITEMINFOW, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR,
@@ -290,6 +292,15 @@ impl MenuBar {
             WM_NCACTIVATE | WM_NCPAINT if self.drawn_dark(adapter) => {
                 let result = unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
                 dark_bar::draw(hwnd, msg, wp, lp);
+                Some(result)
+            }
+            // The default procedure draws the line below a light menu bar only until the window's
+            // DPI changes; then the line shows the redirection surface's black, as on upstream's
+            // winit. The host draws it each time, in the default procedure's `COLOR_3DFACE`.
+            WM_NCACTIVATE | WM_NCPAINT if self.native.borrow().is_some() => {
+                let result = unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+                let color = COLORREF(unsafe { GetSysColor(COLOR_3DFACE) });
+                dark_bar::draw_line_below_bar(hwnd, color);
                 Some(result)
             }
             // `DestroyWindow` destroys the window's menu.
