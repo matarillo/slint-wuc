@@ -4221,6 +4221,7 @@ dependencies = [
  "i-slint-renderer-software",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "vtable",
 ]
@@ -4897,8 +4898,10 @@ checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
 name = "upstream-gallery"
 version = "0.0.0"
 dependencies = [
+ "raw-window-handle",
  "slint",
  "slint-build",
+ "windows",
 ]
 
 [[package]]

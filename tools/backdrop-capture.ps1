@@ -58,7 +58,9 @@ $backdrop.Bounds = New-Object System.Drawing.Rectangle(($screen.Right - $bw), ($
 $backdrop.Show(); [System.Windows.Forms.Application]::DoEvents()
 
 foreach ($k in $Env.Keys) { [Environment]::SetEnvironmentVariable($k, $Env[$k]) }
-$proc = if ($Arguments.Count) { Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru } else { Start-Process -FilePath $Exe -PassThru }
+# In this console: a console program started in a new one loses the foreground to the terminal
+# that opens for it, and an inactive window shows Mica without the wallpaper's tint.
+$proc = if ($Arguments.Count) { Start-Process -FilePath $Exe -ArgumentList $Arguments -PassThru -NoNewWindow } else { Start-Process -FilePath $Exe -PassThru -NoNewWindow }
 foreach ($k in $Env.Keys) { [Environment]::SetEnvironmentVariable($k, $null) }
 $h = [IntPtr]::Zero
 for ($i = 0; $i -lt 100; $i++) {

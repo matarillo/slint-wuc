@@ -19,8 +19,15 @@ path = "../../tests/probe/src/gallery.rs"
 name = "upstream-titlebar"
 path = "../../tests/probe/src/titlebar.rs"
 
+[[bin]]
+name = "upstream-backdrop"
+path = "../../examples/backdrop/src/main.rs"
+
 [dependencies]
-slint = { version = "=1.19.0", features = ["mcp"] }
+slint = { version = "=1.19.0", features = ["mcp", "raw-window-handle-06"] }
+# For `upstream-backdrop`, as `examples/backdrop` has them.
+raw-window-handle = "0.6"
+windows = { version = "0.62", features = ["Win32_Graphics_Dwm"] }
 
 [build-dependencies]
 slint-build = "=1.19.0"

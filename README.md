@@ -94,6 +94,13 @@ In both ways:
   `MenuBar`, the native menu bar keeps the client area white; with `SLINT_NO_MUDA` set, Slint
   draws the menu bar and Mica shows through it too.
 
+  Upstream's winit backend creates the window only after an iteration of the event loop, so
+  code that also runs on upstream sets the backdrop from a timer. `examples/backdrop` does, and
+  switches between Mica, Mica Alt and Acrylic: `cargo run -p example-backdrop`. The same source
+  builds on upstream as `upstream-backdrop` in `tools/upstream-gallery`.
+- Popup menus (context menus, the menu bar's drop-downs, the tray's menu) are dark when the color
+  scheme is dark. Upstream's stay light.
+
 ## Developing the fork
 
 The tests, the probes and the tools that compare the fork with upstream read upstream's sources

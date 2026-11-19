@@ -1,0 +1,22 @@
+# Copyright © Kentaro Inomata
+# SPDX-License-Identifier: MIT-0
+
+[package]
+name = "example-backdrop"
+description = "Windows 11's system backdrops (Mica, Mica Alt, Acrylic) behind Fluent widgets"
+authors.workspace = true
+edition = "2024"
+license = "MIT-0"
+publish = false
+rust-version.workspace = true
+version = "0.0.0"
+
+[[bin]]
+name = "backdrop"
+path = "src/main.rs"
+
+[dependencies]
+# `raw-window-handle-06`: `Window::window_handle()`, as in upstream.
+slint = { path = "../../crates/slint", features = ["raw-window-handle-06"] }
+raw-window-handle = "0.6"
+windows = { workspace = true, features = ["Win32_Graphics_Dwm"] }

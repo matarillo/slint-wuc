@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
 
 [workspace]
-members = ["crates/core", "crates/core-macros", "crates/common", "crates/slint", "tests/fixtures", "tests/probe", "tests/conformance", "crates/testing", "tests/driver", "tests/driverlib", "tests/input", "tests/screenshots", "tools/ui-check", "tools/cpp-headers"]
+members = ["crates/core", "crates/core-macros", "crates/common", "crates/slint", "tests/fixtures", "tests/probe", "tests/conformance", "crates/testing", "tests/driver", "tests/driverlib", "tests/input", "tests/screenshots", "tools/ui-check", "tools/cpp-headers", "examples/backdrop"]
 # `reference/` is the read-only upstream Slint tree; `spikes/` and `tools/upstream-gallery` are
 # workspaces of their own.
 exclude = ["reference", "spikes", "tools/upstream-gallery"]

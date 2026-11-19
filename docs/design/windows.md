@@ -117,7 +117,10 @@ The host applies the `Window` item's properties as upstream's winit backend does
 - The HWND exists once `show()` has created it; before that, the handle reports `HandleError::Unavailable`, as winit's does before its window exists.
 - The handle asks the window each time, so one taken before `show()` works after it.
 - It keeps the window alive, as upstream's keeps the winit window, so the HWND stays valid while someone holds it.
-- Applications set what upstream has no API for through it, such as the Mica backdrop (`tests/probe/src/mica.rs`).
+- Applications set what upstream has no API for through it, such as the Mica backdrop (`tests/probe/src/mica.rs`, `examples/backdrop`).
+- `examples/backdrop` builds unchanged on upstream (`upstream-backdrop` in `tools/upstream-gallery`).
+  There, the handle reports `NotSupported` until the winit window exists, after an iteration of the event loop, so the example sets the backdrop from a timer that retries.
+  Captured with `tools/backdrop-capture.ps1` (2026-11-19, build 26200): Mica showed the same on both, `#EFF4F9` at the center of an active window; on the fork, Mica Alt `#CDDDEC`, Acrylic the backdrop window blurred through (`#FF73FF` over magenta), and none the style's opaque background.
 
 ## System Settings
 
