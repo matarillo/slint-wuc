@@ -138,6 +138,7 @@ impl AccessKit {
 /// Raising the events of an update sends `WM_GETOBJECT`, so this stays apart from the
 /// `AccessKitAdapter`, which is borrowed while it updates the tree.
 struct Platform {
+    hwnd: HWND,
     adapter: RefCell<accesskit_windows::Adapter>,
     activation_handler: RefCell<ActivationHandler>,
     requests: mpsc::Receiver<ActionRequest>,
@@ -148,6 +149,7 @@ impl Platform {
         let (sender, requests) = mpsc::channel();
         let action_handler = ActionHandler { hwnd: hwnd.0 as usize, sender };
         Self {
+            hwnd,
             adapter: RefCell::new(accesskit_windows::Adapter::new(hwnd, false, action_handler)),
             activation_handler: RefCell::new(ActivationHandler { hwnd }),
             requests,
@@ -155,7 +157,21 @@ impl Platform {
     }
 
     fn update_if_active(&self, update_factory: impl FnOnce() -> TreeUpdate) {
-        let events = self.adapter.borrow_mut().update_if_active(update_factory);
+        let mut built = None;
+        let events = self.adapter.borrow_mut().update_if_active(|| {
+            let update = update_factory();
+            built = Some((update.nodes.len(), update.focus));
+            update
+        });
+        trace(format_args!(
+            "{:?} update: {} events, {}",
+            self.hwnd.0,
+            if events.is_some() { "raises" } else { "no" },
+            match built {
+                Some((nodes, focus)) => format!("{nodes} nodes, focus {}", focus.0),
+                None => "inactive".into(),
+            }
+        ));
         if let Some(events) = events {
             events.raise();
         }
@@ -163,6 +179,11 @@ impl Platform {
 
     fn update_window_focus_state(&self, is_focused: bool) {
         let events = self.adapter.borrow_mut().update_window_focus_state(is_focused);
+        trace(format_args!(
+            "{:?} focused {is_focused}: {} events",
+            self.hwnd.0,
+            if events.is_some() { "raises" } else { "no" }
+        ));
         if let Some(events) = events {
             events.raise();
         }
@@ -170,14 +191,56 @@ impl Platform {
 
     fn handle_wm_getobject(&self, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
         // A nested `WM_GETOBJECT` arrives while an update raises its events.
-        let mut adapter = self.adapter.try_borrow_mut().ok()?;
+        let Ok(mut adapter) = self.adapter.try_borrow_mut() else {
+            trace(format_args!("{:?} WM_GETOBJECT {} while updating", self.hwnd.0, lp.0 as i32));
+            return None;
+        };
         let mut activation_handler = self.activation_handler.borrow_mut();
         let result = adapter.handle_wm_getobject(wp, lp, &mut *activation_handler);
         drop(adapter);
         drop(activation_handler);
+        trace(format_args!(
+            "{:?} WM_GETOBJECT {}: {}",
+            self.hwnd.0,
+            lp.0 as i32,
+            if result.is_some() { "provider" } else { "none" }
+        ));
         // Returning the provider can send `WM_GETOBJECT` again.
         result.map(Into::into)
     }
+}
+
+/// Prints when UI Automation asks a window for its tree and when AccessKit raises events, when
+/// `SLINT_FORK_TRACE_A11Y` is set.
+fn trace(args: core::fmt::Arguments) {
+    static START: std::sync::OnceLock<Option<std::time::Instant>> = std::sync::OnceLock::new();
+    let start = START.get_or_init(|| {
+        std::env::var_os("SLINT_FORK_TRACE_A11Y").is_some().then(std::time::Instant::now)
+    });
+    if let Some(start) = start {
+        eprintln!("[a11y {:>6}ms] {args}", start.elapsed().as_millis());
+    }
+}
+
+/// How the tree of a popup window stands in for the combo box that upstream puts its list
+/// under, which `SLINT_FORK_A11Y_POPUP` picks while the owner compares them with Narrator:
+/// `list` makes the popup's root a list box, `selected` hands the focus that falls on the
+/// popup's root to its selected item, and `both` does both.
+#[derive(Clone, Copy)]
+struct PopupVariant {
+    list_root: bool,
+    focus_selected: bool,
+}
+
+fn popup_variant() -> PopupVariant {
+    static VARIANT: std::sync::OnceLock<PopupVariant> = std::sync::OnceLock::new();
+    *VARIANT.get_or_init(|| {
+        let value = std::env::var("SLINT_FORK_A11Y_POPUP").unwrap_or_default();
+        PopupVariant {
+            list_root: matches!(&*value, "list" | "both"),
+            focus_selected: matches!(&*value, "selected" | "both"),
+        }
+    })
 }
 
 /// Asks the window for the tree, which it builds once it handles the posted message, as
@@ -304,6 +367,7 @@ impl AccessKitAdapter {
                 next_component_id: 1,
                 free_component_ids: Default::default(),
                 root_node_id: NodeId(0),
+                list_root: None,
                 components_by_id: Default::default(),
                 component_ids: Default::default(),
                 all_nodes: Default::default(),
@@ -481,6 +545,7 @@ impl AccessKitAdapter {
                                     scale_factor,
                                     window_position,
                                 );
+                                self.nodes.make_list_root(cached_node.id, &mut node);
                                 node.set_children(cached_node.children.clone());
 
                                 let mut emitted: Vec<(NodeId, Node)> = Vec::new();
@@ -560,6 +625,16 @@ fn decode_sub_node_id(id: NodeId) -> Option<(NodeId, u32)> {
     (sub_index != 0).then_some((NodeId(id.0 & NODE_ID_PARENT_MASK), sub_index))
 }
 
+/// The first accessible item below `item` that is selected, under [`PopupVariant`].
+fn selected_descendant(item: &ItemRc) -> Option<ItemRc> {
+    crate::accessibility::accessible_descendents(item).find_map(|child| {
+        let selected = child
+            .accessible_string_property(AccessibleStringProperty::ItemSelected)
+            .is_some_and(|x| x == "true");
+        if selected { Some(child) } else { selected_descendant(&child) }
+    })
+}
+
 fn is_text_input_role(role: Role) -> bool {
     matches!(
         role,
@@ -582,6 +657,8 @@ struct NodeCollection {
     component_ids: HashMap<NonNull<u8>, u32>,
     all_nodes: Vec<CachedNode>,
     root_node_id: NodeId,
+    /// The root of a popup window's tree, which [`PopupVariant`] makes a list box.
+    list_root: Option<NodeId>,
     focused_node_tracker: Pin<Box<PropertyTracker<false, DelegateFocusPropertyTracker>>>,
     /// Emission state, keyed by the inner `TextInput`'s `ItemRc`. Its per-entry property tracker
     /// stays empty on purpose: the state has to outlive the edits it describes, so that NodeIds
@@ -604,13 +681,25 @@ impl NodeCollection {
                     .upgrade()
                     .map(|focus_item| {
                         let parent = nearest_accessible_item(focus_item);
+                        let popup_root = window_adapter.popup.is_some()
+                            && parent
+                                .parent_item(
+                                    crate::item_tree::ParentItemTraversalMode::StopAtPopups,
+                                )
+                                .is_none();
                         self.focused_node_tracker
                             .as_ref()
                             .evaluate(|| {
                                 crate::accessibility::accessible_focus_delegate_position(&parent)
-                            })
-                            .and_then(|position| {
-                                crate::accessibility::accessible_descendents(&parent).nth(position)
+                                    .and_then(|position| {
+                                        crate::accessibility::accessible_descendents(&parent)
+                                            .nth(position)
+                                    })
+                                    .or_else(|| {
+                                        (popup_root && popup_variant().focus_selected)
+                                            .then(|| selected_descendant(&parent))
+                                            .flatten()
+                                    })
                             })
                             .unwrap_or(parent)
                     })
@@ -736,6 +825,7 @@ impl NodeCollection {
             let mut text_run_nodes: Vec<(NodeId, Node)> = Vec::new();
             let node = tracker.as_ref().evaluate(|| {
                 let mut n = self.build_node_without_children(&item, scale_factor, window_position);
+                self.make_list_root(id, &mut n);
                 n.set_children(descendant_children.clone());
                 self.try_emit_text_input_accessibility(
                     &item,
@@ -810,6 +900,13 @@ impl NodeCollection {
         }
     }
 
+    /// Makes the root of a popup window's tree a list box, under `SLINT_FORK_A11Y_POPUP`.
+    fn make_list_root(&self, id: NodeId, node: &mut Node) {
+        if self.list_root == Some(id) {
+            node.set_role(Role::ListBox);
+        }
+    }
+
     fn tree_info(&self, root: NodeId) -> TreeInfo {
         let mut tree = TreeInfo::new(root);
         tree.toolkit_name = Some("Slint".into());
@@ -843,6 +940,8 @@ impl NodeCollection {
             };
         };
         let root_item = ItemRc::new_root(component);
+        self.list_root = (window_adapter.popup.is_some() && popup_variant().list_root)
+            .then(|| self.encode_item_node_id(&root_item));
 
         let popups = window_inner
             .active_popups()

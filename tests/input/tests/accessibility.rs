@@ -194,6 +194,9 @@ struct Event {
     heard: Heard,
     name: String,
     has_keyboard_focus: bool,
+    control_type: UIA_CONTROLTYPE_ID,
+    /// The control type of the container that a selected item names, if it names one.
+    container: Option<UIA_CONTROLTYPE_ID>,
 }
 
 impl Event {
@@ -201,7 +204,17 @@ impl Event {
         let name = unsafe { element.CurrentName() }.map(|n| n.to_string()).unwrap_or_default();
         let has_keyboard_focus =
             unsafe { element.CurrentHasKeyboardFocus() }.is_ok_and(|focus| focus.as_bool());
-        Self { heard, name, has_keyboard_focus }
+        let control_type = unsafe { element.CurrentControlType() }.unwrap_or_default();
+        let container = unsafe {
+            element
+                .GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(
+                    UIA_SelectionItemPatternId,
+                )
+                .and_then(|item| item.CurrentSelectionContainer())
+                .and_then(|container| container.CurrentControlType())
+        }
+        .ok();
+        Self { heard, name, has_keyboard_focus, control_type, container }
     }
 }
 
@@ -338,7 +351,17 @@ fn press(hwnd: HWND, vk: u16, scan: u32, extended: bool) {
 
 /// The list of upstream's combo box keeps the focus on itself and selects its items with the
 /// arrow keys: the client hears the selection, from the list's popup.
+///
+/// `SLINT_FORK_A11Y_POPUP` picks how the popup's tree stands in for the combo box, while the
+/// owner compares them with Narrator: `list` gives the items a list as their container, and
+/// `selected` moves the focus to the selected item; `both` does both. With `both`, this takes
+/// some 16 seconds more, while the window raises the events of the down key. Probably the client
+/// asks the item for its container meanwhile and waits for this thread, which a screen reader in
+/// a process of its own doesn't.
 fn the_combo_box_list_tells_its_selection() {
+    let variant = std::env::var("SLINT_FORK_A11Y_POPUP").unwrap_or_default();
+    let list_root = matches!(&*variant, "list" | "both");
+    let focus_selected = matches!(&*variant, "selected" | "both");
     let ui = ComboBoxTest::new().unwrap();
     let hwnd =
         Win32WindowAdapter::from_window(ui.window()).unwrap().create_hwnd_for_testing().unwrap();
@@ -349,10 +372,29 @@ fn the_combo_box_list_tells_its_selection() {
     // time to ask for the window's tree, and for the popup's once it opens.
     events.settle(Duration::from_millis(500));
     press(hwnd, VK_RETURN.0, 0x1c, false);
+    if focus_selected {
+        let one = events.wait_for(Heard::Focus, "One");
+        assert!(one.has_keyboard_focus, "{one:?}");
+    }
     events.settle(Duration::from_millis(500));
+    if list_root && !focus_selected {
+        let seen = &events.seen;
+        let list =
+            seen.iter().any(|e| e.heard == Heard::Focus && e.control_type == UIA_ListControlTypeId);
+        assert!(list, "{seen:?}");
+    }
     press(hwnd, VK_DOWN.0, 0x50, true);
-    events.wait_for(Heard::Selected, "Two");
+    let two = events.wait_for(Heard::Selected, "Two");
+    let expected = list_root.then_some(UIA_ListControlTypeId);
+    assert_eq!(two.container, expected, "{two:?}");
+    if focus_selected {
+        // The focus moves before the selection is told.
+        let seen = &events.seen;
+        let two = seen.iter().find(|e| e.heard == Heard::Focus && e.name == "Two");
+        assert!(two.is_some_and(|two| two.has_keyboard_focus), "{seen:?}");
+    }
     assert_eq!(ui.get_current(), 1);
+    events.settle(Duration::from_millis(200));
     events.stop();
 }
 
