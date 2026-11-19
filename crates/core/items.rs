@@ -1367,12 +1367,25 @@ impl Item for WindowItem {
 
     fn update_visual(
         self: Pin<&Self>,
-        _self_rc: &ItemRc,
+        self_rc: &ItemRc,
         visual: &mut VisualUpdateRef,
         size: LogicalSize,
     ) -> RenderingResult {
-        // The window's own background, and that of nested windows such as dialogs.
-        visual.fill(&self.background(), size);
+        // The window's own background, and that of nested windows such as dialogs. The root
+        // window's leaves out where the system draws over it.
+        let hole = self_rc
+            .window_adapter()
+            .filter(|adapter| is_root_window_item(adapter, self_rc))
+            .and_then(|adapter| {
+                adapter.internal(crate::InternalToken).and_then(|i| i.window_background_hole())
+            });
+        match hole {
+            Some(hole) => visual.fill_except(&self.background(), size, hole),
+            None => {
+                visual.remove_floor();
+                visual.fill(&self.background(), size);
+            }
+        }
         RenderingResult::ContinueRenderingChildren
     }
 

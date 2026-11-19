@@ -65,6 +65,7 @@ mod popup;
 mod snapshot;
 mod test_font;
 mod theme;
+pub mod title_bar;
 
 const WM_APP_INVOKE: u32 = WM_APP + 1;
 const WM_APP_QUIT: u32 = WM_APP + 2;
@@ -542,6 +543,7 @@ pub struct Win32WindowAdapter {
     /// Whether the title bar is dark, once the host has set it.
     dark_title_bar: Cell<Option<bool>>,
     frame: frame::Frame,
+    title_bar: title_bar::State,
     menu_bar: menu::MenuBar,
     context_menu: RefCell<Option<menu::PendingContextMenu>>,
     /// What takes the drops from other programs, once a top-level window's HWND has it.
@@ -612,6 +614,7 @@ impl Win32WindowAdapter {
             popup,
             dark_title_bar: Cell::new(None),
             frame: Default::default(),
+            title_bar: Default::default(),
             menu_bar: menu::MenuBar::new(weak.clone()),
             context_menu: Default::default(),
             drop_target: Default::default(),
@@ -654,7 +657,15 @@ impl Win32WindowAdapter {
     /// have windows of their own drawn over them, as upstream's renderers draw popups inside
     /// the window.
     fn take_snapshot(&self) -> Result<SharedPixelBuffer<Rgba8Pixel>, PlatformError> {
-        let mut snapshot = self.capture(self.size.get())?;
+        let size = self.size.get();
+        let mut snapshot = match self.margin().top {
+            0 => self.capture(size)?,
+            // The root visual is moved down by the margin of a maximized top-level window.
+            top => {
+                let full = self.capture(PhysicalSize::new(size.width, size.height + top as u32))?;
+                crop_top(&full, top as u32)
+            }
+        };
         if self.popup.is_none() {
             popup::draw_popups(self, &mut snapshot);
         }
@@ -733,6 +744,10 @@ impl Win32WindowAdapter {
                     GetDpiForSystem(),
                 );
             }
+            if menu.is_none() && self.extends_into_title_bar() {
+                // The client area takes the title bar.
+                rc.top = 0;
+            }
             let frame = (
                 rc.right - rc.left + margin.left + margin.right,
                 rc.bottom - rc.top + margin.top + margin.bottom,
@@ -778,6 +793,10 @@ impl Win32WindowAdapter {
         if self.popup.is_none() {
             *self.drop_target.borrow_mut() = drop::register(self, hwnd);
             self.frame.created(hwnd);
+            // `CreateWindowExW` sizes the client before the window procedure finds the adapter.
+            if self.extends_into_title_bar() {
+                frame::frame_changed(hwnd);
+            }
             if let Some(item) = self.inner().window_item() {
                 self.frame.set_icon(hwnd, &item.as_pin_ref().icon());
             }
@@ -801,6 +820,7 @@ impl Win32WindowAdapter {
             Some(size) => self.set_size(size),
             None => self.resized(self.content_size(client_size(hwnd))),
         }
+        self.update_title_bar();
         Ok(hwnd)
     }
 
@@ -885,9 +905,13 @@ impl Win32WindowAdapter {
         }
     }
 
-    /// The room around a popup for what it draws past its edges; none for other windows.
+    /// The room around a popup for what it draws past its edges; for a top-level window, the
+    /// room above the content of a maximized window that extends into the title bar.
     fn margin(&self) -> popup::Margin {
-        self.popup.as_ref().map(|p| p.margin.get()).unwrap_or_default()
+        match &self.popup {
+            Some(popup) => popup.margin.get(),
+            None => popup::Margin { top: self.title_bar.top_margin.get(), ..Default::default() },
+        }
     }
 
     /// The window that isn't a popup: this one, or the one its popups belong to.
@@ -1025,6 +1049,10 @@ impl Win32WindowAdapter {
             let has_menu = !GetMenu(hwnd).is_invalid();
             let _ = AdjustWindowRectExForDpi(&mut rc, style, has_menu, ex_style, dpi);
         }
+        if self.extends_into_title_bar() {
+            // The client area takes the title bar.
+            rc.top = 0;
+        }
         let margin = self.margin();
         (
             rc.right - rc.left + margin.left + margin.right,
@@ -1115,7 +1143,8 @@ impl WindowAdapter for Win32WindowAdapter {
     fn position(&self) -> Option<PhysicalPosition> {
         let mut rc = RECT::default();
         unsafe { GetWindowRect(self.hwnd.get()?, &mut rc) }.ok()?;
-        let margin = self.margin();
+        // A top-level window's position is its frame's, whatever its content's margin.
+        let margin = self.popup.as_ref().map(|p| p.margin.get()).unwrap_or_default();
         Some(PhysicalPosition::new(rc.left + margin.left, rc.top + margin.top))
     }
 
@@ -1222,9 +1251,17 @@ impl WindowAdapter for Win32WindowAdapter {
         {
             let item = item.as_pin_ref();
             self.frame.update(item, constraints);
+            self.title_bar.set_background(&properties.background());
             if let Some(hwnd) = self.hwnd.get() {
+                let extended = self.extends_into_title_bar();
                 self.frame.apply(self, hwnd, self.visible.get());
                 self.frame.set_icon(hwnd, &item.icon());
+                if self.extends_into_title_bar() != extended {
+                    // Full screen or `no-frame` started or ended.
+                    self.update_title_bar();
+                } else {
+                    self.update_caption_color(hwnd);
+                }
             }
             if self.frame.sized_by_state() && !self.detached {
                 return;
@@ -1292,6 +1329,22 @@ impl WindowAdapterInternal for Win32WindowAdapter {
         }
     }
 
+    fn window_move_area_is_title_bar(&self) -> bool {
+        self.hwnd.get().is_some() && self.extends_into_title_bar()
+    }
+
+    fn toggle_maximized_from_title_bar(&self) {
+        self.toggle_maximized();
+    }
+
+    fn show_system_menu(&self, position: crate::lengths::LogicalPoint) {
+        self.request_system_menu(position);
+    }
+
+    fn window_background_hole(&self) -> Option<crate::lengths::LogicalRect> {
+        if self.popup.is_some() { None } else { self.title_bar.hole() }
+    }
+
     fn create_child_window_adapter(
         &self,
         kind: crate::window::WindowKind,
@@ -1330,6 +1383,7 @@ impl WindowAdapterInternal for Win32WindowAdapter {
         !self.detached
             && self.popup.is_none()
             && !menu::disabled()
+            && !self.title_bar.wanted()
             && (self.hwnd.get().is_none() || self.has_redirection_surface())
     }
 
@@ -1510,7 +1564,22 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             menu::open_context_menu(&adapter, hwnd);
             LRESULT(0)
         }
+        title_bar::WM_APP_TITLE_BAR => {
+            adapter.report_title_bar();
+            LRESULT(0)
+        }
+        title_bar::WM_APP_SYSTEM_MENU => {
+            title_bar::open_system_menu(hwnd, lp);
+            LRESULT(0)
+        }
+        WM_ACTIVATE => {
+            // DWM forgets the extended frame on some activations.
+            adapter.update_title_bar();
+            unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
+        }
         WM_SIZE if wp.0 != SIZE_MINIMIZED as usize => {
+            // Maximizing changes the content's margin.
+            adapter.update_title_bar();
             let client = PhysicalSize::new((lp.0 & 0xffff) as u32, ((lp.0 >> 16) & 0xffff) as u32);
             let size = adapter.content_size(client);
             // A size that the intended logical size doesn't explain comes from the user.
@@ -1587,6 +1656,7 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             // `SetWindowPos` sends no WM_SIZE when the physical size stays the same, and the
             // logical size must follow the new scale anyway.
+            adapter.update_title_bar();
             let client = adapter.content_size(client_size(hwnd));
             trace_dpi(format_args!(
                 "WM_DPICHANGED done: client {}x{}",
@@ -1616,8 +1686,10 @@ extern "system" fn window_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         // The app mode, a high contrast theme, or the accent color may have changed.
-        WM_SETTINGCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED => {
+        WM_SETTINGCHANGE | WM_DWMCOLORIZATIONCOLORCHANGED | WM_THEMECHANGED => {
             theme::apply(&adapter.window, hwnd, &adapter.dark_title_bar);
+            // The title bar's metrics may have changed.
+            adapter.update_title_bar();
             unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
@@ -1676,6 +1748,15 @@ fn to_physical(size: LogicalSize, dpi: u32) -> PhysicalSize {
     let scale = dpi as f64 / 96.0;
     let px = |v: f32| (v as f64 * scale).round().clamp(0.0, (i32::MAX / 2) as f64) as u32;
     PhysicalSize::new(px(size.width), px(size.height))
+}
+
+/// `pixels` without its top `rows` rows.
+fn crop_top(pixels: &SharedPixelBuffer<Rgba8Pixel>, rows: u32) -> SharedPixelBuffer<Rgba8Pixel> {
+    let (width, height) = (pixels.width(), pixels.height().saturating_sub(rows));
+    let start = (rows * width) as usize;
+    let mut cropped = SharedPixelBuffer::new(width, height);
+    cropped.make_mut_slice().copy_from_slice(&pixels.as_slice()[start..]);
+    cropped
 }
 
 fn client_size(hwnd: HWND) -> PhysicalSize {
@@ -2057,6 +2138,43 @@ mod tests {
         let scale = dpi as f32 / 96.;
         assert_eq!(item_size(), (physical.width as f32 / scale, physical.height as f32 / scale));
         adapter.window().hide().unwrap();
+    }
+
+    /// The client area takes the title bar, and switching keeps the client size: before the
+    /// HWND exists and after.
+    #[test]
+    fn extending_into_the_title_bar_keeps_the_client_size() {
+        use crate::api::LogicalSize;
+        let ctx = crate::SlintContext::new(Box::new(Platform::new().unwrap()));
+        let adapter = ctx.create_window_adapter().unwrap();
+        let tree = RectTree::new((100., 50.), 0);
+        WindowInner::from_pub(adapter.window()).set_component(&vtable::VRc::into_dyn(tree.clone()));
+        adapter.window().set_size(LogicalSize::new(300., 200.));
+        title_bar::set_extends_content_into_title_bar(adapter.window(), true);
+        assert!(title_bar::extends_content_into_title_bar(adapter.window()));
+        assert_eq!(title_bar::title_bar(adapter.window()), None);
+
+        let host = Win32WindowAdapter::from_window(adapter.window()).unwrap();
+        let hwnd = host.create_hwnd_for_testing().unwrap();
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        let client = to_physical(LogicalSize::new(300., 200.), dpi);
+        let window_height = || {
+            let mut rc = RECT::default();
+            unsafe { GetWindowRect(hwnd, &mut rc).unwrap() };
+            rc.bottom - rc.top
+        };
+        assert_eq!(client_size(hwnd), client);
+        let extended = window_height();
+
+        title_bar::set_extends_content_into_title_bar(adapter.window(), false);
+        assert_eq!(client_size(hwnd), client);
+        assert_eq!(window_height(), extended + frame::caption_band(dpi));
+        assert_eq!(title_bar::title_bar(adapter.window()), None);
+
+        title_bar::set_extends_content_into_title_bar(adapter.window(), true);
+        assert_eq!(client_size(hwnd), client);
+        assert_eq!(window_height(), extended);
+        assert_eq!(host.margin(), popup::Margin::default());
     }
 
     #[test]

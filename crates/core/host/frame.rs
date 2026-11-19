@@ -4,6 +4,7 @@
 //! The frame and state of a top-level window, from the properties of its `Window` item, as
 //! upstream's winit backend applies them on Windows: `no-frame`, `always-on-top`,
 //! `full-screen`, `maximized`, `minimized`, whether the user can resize the window, and `icon`.
+//! Also the frame of a window whose content extends into the title bar (`title_bar.rs`).
 
 use super::Win32WindowAdapter;
 use super::bitmap::{self, Alpha};
@@ -13,6 +14,7 @@ use crate::window::{LayoutConstraints, WindowInner};
 use core::cell::{Cell, RefCell};
 use core::pin::Pin;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::DwmDefWindowProc;
 use windows::Win32::Graphics::Gdi::{
     CreateBitmap, DeleteObject, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
     MonitorFromWindow, ScreenToClient,
@@ -130,6 +132,12 @@ impl Frame {
     /// Whether `frame_size` adds nothing to the client size.
     pub(super) fn client_covers_window(&self) -> bool {
         self.shown.get().unwrap_or_else(|| self.wanted.get()).client_covers_window()
+    }
+
+    /// Whether the window has a title bar: it isn't `no-frame` and isn't full screen.
+    pub(super) fn has_caption(&self) -> bool {
+        let state = self.shown.get().unwrap_or_else(|| self.wanted.get());
+        !state.no_frame && !state.full_screen
     }
 
     /// Whether the window's size follows its state rather than the size it was given.
@@ -289,7 +297,8 @@ impl Frame {
         }
     }
 
-    /// Handles the messages of a frameless window's border; follows `WM_SIZE`.
+    /// Handles the messages of a frameless window's border and of a window that extends into
+    /// its title bar; follows `WM_SIZE`.
     pub(super) fn handle(
         &self,
         adapter: &Win32WindowAdapter,
@@ -298,10 +307,45 @@ impl Frame {
         wp: WPARAM,
         lp: LPARAM,
     ) -> Option<LRESULT> {
+        if adapter.extends_into_title_bar() {
+            // The caption buttons: hover, press and the hit test of Snap Layouts.
+            let mut result = LRESULT(0);
+            if unsafe { DwmDefWindowProc(hwnd, msg, wp, lp, &mut result) }.as_bool() {
+                return Some(result);
+            }
+        }
         match msg {
             WM_SIZE => {
                 self.sized(adapter, wp.0 as u32);
                 None
+            }
+            WM_NCCALCSIZE if wp.0 != 0 && adapter.extends_into_title_bar() => {
+                // The default frame on the left, right and bottom; the client area takes the
+                // title bar. A maximized window isn't inset at the top: that stops DWM from
+                // hit-testing the caption buttons, so the host moves the content down instead.
+                // SAFETY: with wParam TRUE, lParam points to NCCALCSIZE_PARAMS.
+                let top = unsafe { (*(lp.0 as *const NCCALCSIZE_PARAMS)).rgrc[0].top };
+                let result = unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+                unsafe { (*(lp.0 as *mut NCCALCSIZE_PARAMS)).rgrc[0].top = top };
+                Some(result)
+            }
+            WM_NCHITTEST if adapter.extends_into_title_bar() => {
+                let result = unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+                if result.0 as u32 != HTCLIENT {
+                    return Some(result);
+                }
+                // The top resize edge, inside the client area now.
+                let shown = self.shown.get()?;
+                let mut point = super::input::point_from_lparam(lp);
+                unsafe {
+                    let _ = ScreenToClient(hwnd, &mut point);
+                }
+                let dpi = unsafe { GetDpiForWindow(hwnd) };
+                let zoomed = unsafe { IsZoomed(hwnd).as_bool() };
+                if shown.resizable && !zoomed && point.y < frame_y(dpi) {
+                    return Some(LRESULT(HTTOP as isize));
+                }
+                Some(result)
             }
             WM_NCCALCSIZE if wp.0 != 0 && self.client_covers_window() => {
                 if unsafe { IsZoomed(hwnd).as_bool() } {
@@ -377,11 +421,23 @@ impl Frame {
     }
 }
 
-fn set_style(hwnd: HWND, style: WINDOW_STYLE) {
+/// The frame's thickness at the top plus its padding: the top resize edge, and how far a
+/// maximized window reaches above the monitor.
+pub(super) fn frame_y(dpi: u32) -> i32 {
+    let frame = unsafe { GetSystemMetricsForDpi(SM_CYFRAME, dpi) };
+    frame + unsafe { GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) }
+}
+
+/// The height of a title bar with the frame above it, in physical pixels: what the frame
+/// takes at the top of a window that isn't maximized.
+pub(super) fn caption_band(dpi: u32) -> i32 {
+    let caption = unsafe { GetSystemMetricsForDpi(SM_CYCAPTION, dpi) };
+    caption + frame_y(dpi)
+}
+
+/// Makes the window compute its client area again.
+pub(super) fn frame_changed(hwnd: HWND) {
     unsafe {
-        let current = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
-        let keep = current & (WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);
-        SetWindowLongW(hwnd, GWL_STYLE, (style | keep).0 as i32);
         let _ = SetWindowPos(
             hwnd,
             None,
@@ -392,6 +448,15 @@ fn set_style(hwnd: HWND, style: WINDOW_STYLE) {
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
     }
+}
+
+fn set_style(hwnd: HWND, style: WINDOW_STYLE) {
+    unsafe {
+        let current = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
+        let keep = current & (WS_VISIBLE | WS_MINIMIZE | WS_MAXIMIZE);
+        SetWindowLongW(hwnd, GWL_STYLE, (style | keep).0 as i32);
+    }
+    frame_changed(hwnd);
 }
 
 /// The icons that a window shows, destroyed once it no longer does.

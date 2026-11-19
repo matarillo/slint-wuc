@@ -75,6 +75,23 @@ The host applies the `Window` item's properties as upstream's winit backend does
   Upstream switched the scale while the snap area at the monitors' edge was showing, and flickered; the fork didn't.
 - Live resize: the content lags the frame by one or two frames (spike S1). The owner found nothing wrong in `probe-titlebar`, with and without a redirection surface (2026-11-19), so the host doesn't sync inside `WM_SIZE`.
 
+## Title Bar
+
+`host/title_bar.rs` extends a framed top-level window's content into its title bar, as WinUI 3's `ExtendsContentIntoTitleBar`: the client area covers the title bar, and DWM keeps drawing and hit-testing the caption buttons, so Snap Layouts stays on the maximize button.
+The API is unstable (facade feature `unstable-wuc`).
+
+- `no-frame`, full screen and popups don't extend, and neither does a window with a native `MenuBar`: GDI draws the bar in the non-client area, which the client area would cover.
+  `supports_native_menu_bar()` is false once extension is asked for, but a component created before that already has the native bar.
+- Moving the window is upstream's `WindowMoveArea`. While the window extends, a double click on it toggles maximized and a right click opens the system menu, from posted messages, as the context menus are.
+  - Why not `HTCAPTION` from `WM_NCHITTEST` over the title bar: the host would have to guess which items take clicks, and a wrong guess makes a button unclickable.
+  - The area counts the double click itself: it ignores the release and the moves, so the core no longer sees it under the mouse and counts every press as a first one.
+- Maximized: the client area isn't inset at the top, since that stopped `DwmDefWindowProc` from hit-testing the buttons at all (spike). The client starts above the monitor by the frame and its padding (9 px at 120 dpi), and the content moves down by that margin, which every client-to-screen conversion (popups, IME, AccessKit, drops, menus, snapshots) goes through.
+  The extended frame's top is then the title bar plus that margin (47 px at 120 dpi).
+- Slint's visuals are drawn above DWM's buttons, so the root `Window` item's background leaves a hole where they are, and the caption color is the background's while it's an opaque solid color (DWM's default otherwise), which shows seamless. Other items over the buttons hide them; that's the application's to avoid, with `title_bar().buttons`.
+- When: the host extends the frame again on activation (DWM forgot it in the spike), on `WM_SIZE`, DPI and setting changes, and reports the title bar from a posted message once the change is over; the callback runs only when the value changed.
+- `DWMWA_CAPTION_BUTTON_BOUNDS` at 120 dpi: rows 0 to 37 of a restored window, against a 38 px title bar with its frame; a maximized window's start at its top, above the monitor, so 28 px show. `TitleBar::height` is the buttons' bottom in the content's coordinates.
+- Checked 2026-11-20 at 120 dpi with `probe-caption`: button hit tests restored and maximized, the content filling the work area when maximized, the client size kept when switching before and after `show()`, Mica, a dark background, and a background changed while shown. Another DPI wasn't tried.
+
 ## Window Handle
 
 `Window::window_handle()` gives the HWND (facade feature `raw-window-handle-06`, as upstream), so applications set what Slint has no API for, such as Mica, without a fork-only API.

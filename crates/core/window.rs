@@ -344,6 +344,29 @@ pub trait WindowAdapterInternal: core::any::Any {
     /// This is called while the user holds a mouse button pressed.
     /// The default implementation does nothing; backends without support ignore the request.
     fn start_window_move(&self) {}
+
+    /// Whether a `WindowMoveArea` stands for the window's title bar beyond moving it: a double
+    /// click toggles maximized ([`Self::toggle_maximized_from_title_bar`]) and a right click
+    /// opens the system menu ([`Self::show_system_menu`]). The default is `false`.
+    fn window_move_area_is_title_bar(&self) -> bool {
+        false
+    }
+
+    /// Toggles maximized, as a double click on the title bar does. Called while the window
+    /// dispatches the press.
+    fn toggle_maximized_from_title_bar(&self) {}
+
+    /// Opens the window's system menu at `_position`, in logical window coordinates, as a
+    /// right click on the title bar does. Called while the window dispatches the release.
+    fn show_system_menu(&self, _position: crate::lengths::LogicalPoint) {}
+
+    /// A rectangle of the window, in logical coordinates, that the background of its root
+    /// `Window` item leaves out, because the system draws there, such as the caption buttons
+    /// of a window whose content extends into the title bar. Read while the item updates its
+    /// visual, so it must be a property for a change to update it again. The default is none.
+    fn window_background_hole(&self) -> Option<crate::lengths::LogicalRect> {
+        None
+    }
 }
 
 /// This is the parameter from [`WindowAdapterInternal::input_method_request()`] which lets the editable text input field

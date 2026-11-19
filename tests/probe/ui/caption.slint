@@ -1,0 +1,83 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// Content extended into the title bar, for `probe-caption`.
+
+import { Button } from "std-widgets.slint";
+
+export component CaptionProbe inherits Window {
+    title: "Caption probe";
+    in property <bool> opaque-bg: false;
+    in property <bool> dark-bg: false;
+    // The title bar that the host reports.
+    in property <length> band-height: 32px;
+    in property <length> buttons-x: root.width;
+    out property <int> clicks: 0;
+    background: !opaque-bg ? transparent : dark-bg ? #202020 : #e8e8e8;
+    preferred-width: 520px;
+    preferred-height: 380px;
+
+    // The title bar: drags the window, double click maximizes, right click opens the system menu.
+    WindowMoveArea {
+        x: 0;
+        y: 0;
+        width: root.buttons-x;
+        height: root.band-height;
+        Text {
+            x: 12px;
+            text: "Caption probe";
+            vertical-alignment: center;
+            height: parent.height;
+            color: root.dark-bg ? white : black;
+        }
+        Button {
+            x: 160px;
+            y: 2px;
+            width: 100px;
+            height: root.band-height - 4px;
+            text: "In band " + root.clicks;
+            clicked => {
+                root.clicks += 1;
+            }
+        }
+    }
+
+    // The top-left marker: must sit at the content's top-left corner.
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 6px;
+        height: 6px;
+        background: #00c000;
+    }
+
+    // The title bar's lower edge.
+    Rectangle {
+        x: 0;
+        y: root.band-height - 1px;
+        width: root.width;
+        height: 1px;
+        background: #0000ff;
+    }
+
+    Rectangle {
+        x: 40px;
+        y: 80px;
+        width: 240px;
+        height: 120px;
+        background: #2060c0;
+        Text {
+            text: "body";
+            color: white;
+        }
+    }
+
+    // The bottom-right marker: must sit at the content's bottom-right corner.
+    Rectangle {
+        x: root.width - 6px;
+        y: root.height - 6px;
+        width: 6px;
+        height: 6px;
+        background: #c000c0;
+    }
+}

@@ -297,6 +297,10 @@ pub struct WindowMoveArea {
     pub enabled: Property<bool>,
     pressed: Cell<bool>,
     pressed_position: Cell<LogicalPoint>,
+    /// When and where the left button was last pressed, to tell a double click on a title
+    /// bar. The core's click count can't: the area ignores the release and the moves, so the
+    /// core no longer sees it under the mouse and counts the next press as a first one.
+    last_press: Cell<Option<(crate::animations::Instant, LogicalPoint)>>,
     pub cached_rendering_data: CachedRenderingData,
 }
 
@@ -318,13 +322,22 @@ impl Item for WindowMoveArea {
     fn input_event_filter_before_children(
         self: Pin<&Self>,
         event: &MouseEvent,
-        _window_adapter: &Rc<dyn WindowAdapter>,
+        window_adapter: &Rc<dyn WindowAdapter>,
         _self_rc: &ItemRc,
         _: &mut MouseCursorInner,
     ) -> InputEventFilterResult {
         if !self.enabled() {
             self.pressed.set(false);
             return InputEventFilterResult::ForwardAndIgnore;
+        }
+        // A right click that the children leave opens the system menu of a title bar.
+        if matches!(
+            event,
+            MouseEvent::Pressed { button: PointerEventButton::Right, .. }
+                | MouseEvent::Released { button: PointerEventButton::Right, .. }
+        ) && is_title_bar(window_adapter)
+        {
+            return InputEventFilterResult::ForwardEvent;
         }
         super::drag_n_drop::press_drag_filter(&self.pressed, &self.pressed_position, event)
     }
@@ -333,11 +346,39 @@ impl Item for WindowMoveArea {
         self: Pin<&Self>,
         event: &MouseEvent,
         window_adapter: &Rc<dyn WindowAdapter>,
-        _self_rc: &ItemRc,
+        self_rc: &ItemRc,
         _: &mut MouseCursorInner,
     ) -> InputEventResult {
         match event {
+            // As on a title bar: a double click toggles maximized.
+            MouseEvent::Pressed { button: PointerEventButton::Left, position, .. }
+                if is_title_bar(window_adapter) =>
+            {
+                let ctx = WindowInner::from_pub(window_adapter.window()).context();
+                let now = crate::animations::Instant::now(ctx);
+                let interval = ctx.platform().click_interval();
+                let double = self.last_press.take().is_some_and(|(time, at)| {
+                    now - time < interval && (*position - at).square_length() < 100 as Coord
+                });
+                if double {
+                    self.pressed.set(false);
+                    if let Some(internal) = window_adapter.internal(crate::InternalToken) {
+                        internal.toggle_maximized_from_title_bar();
+                    }
+                } else {
+                    self.last_press.set(Some((now, *position)));
+                }
+                InputEventResult::EventAccepted
+            }
             MouseEvent::Pressed { .. } => InputEventResult::EventAccepted,
+            MouseEvent::Released { button: PointerEventButton::Right, position, .. }
+                if is_title_bar(window_adapter) =>
+            {
+                if let Some(internal) = window_adapter.internal(crate::InternalToken) {
+                    internal.show_system_menu(self_rc.map_to_window(*position));
+                }
+                InputEventResult::EventIgnored
+            }
             MouseEvent::Exit | MouseEvent::Released { .. } => {
                 self.pressed.set(false);
                 InputEventResult::EventIgnored
@@ -351,6 +392,8 @@ impl Item for WindowMoveArea {
                     *position,
                 ) {
                     self.pressed.set(false);
+                    // A press that moved the window doesn't start a double click.
+                    self.last_press.set(None);
                     if let Some(internal) = window_adapter.internal(crate::InternalToken) {
                         internal.start_window_move();
                     }
@@ -415,6 +458,11 @@ impl Item for WindowMoveArea {
     fn clips_children(self: core::pin::Pin<&Self>) -> bool {
         false
     }
+}
+
+/// Whether the window's `WindowMoveArea`s stand for its title bar, beyond moving it.
+fn is_title_bar(window_adapter: &Rc<dyn WindowAdapter>) -> bool {
+    window_adapter.internal(crate::InternalToken).is_some_and(|i| i.window_move_area_is_title_bar())
 }
 
 impl ItemConsts for WindowMoveArea {

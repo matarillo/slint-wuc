@@ -233,7 +233,9 @@ pub(super) fn draw_popups(
     snapshot: &mut SharedPixelBuffer<Rgba8Pixel>,
 ) {
     let Some(hwnd) = adapter.hwnd.get() else { return };
-    let mut origin = POINT::default();
+    // The snapshot starts where the content does, after the window's margin.
+    let margin = adapter.margin();
+    let mut origin = POINT { x: margin.left, y: margin.top };
     unsafe {
         let _ = ClientToScreen(hwnd, &mut origin);
     }

@@ -228,6 +228,50 @@ impl VisualUpdate<'_> {
         }
     }
 
+    /// Like [`Self::fill`], but leaves out `hole`, a rectangle in the node's coordinates.
+    ///
+    /// The brush fills sprites of the node's whole size, each clipped to one side of the hole,
+    /// so that a gradient spans the node as with [`Self::fill`]. Edges that fall between
+    /// physical pixels may show a seam between the sprites.
+    pub fn fill_except(&mut self, brush: &crate::Brush, size: LogicalSize, hole: LogicalRect) {
+        let area = LogicalRect::from_size(size);
+        let Some(hole) = hole.intersection(&area).filter(|h| !h.is_empty()) else {
+            self.remove_floor();
+            return self.fill(brush, size);
+        };
+        if brush.is_transparent() {
+            self.remove_floor();
+            self.plain();
+            return;
+        }
+        let Some(b) = self.brush(brush, size.cast_unit()) else { return };
+        let (floor, _, origin) = self.clipped_covering(area.cast());
+        let Ok(children) = floor.Children() else { return };
+        let (w, h) = (size.width as f32, size.height as f32);
+        let (left, top, right, bottom) =
+            (hole.min_x() as f32, hole.min_y() as f32, hole.max_x() as f32, hole.max_y() as f32);
+        // Insets of the parts above, below, left of and right of the hole.
+        let parts = [
+            (0., 0., 0., h - top),
+            (0., bottom, 0., 0.),
+            (0., top, w - left, h - bottom),
+            (right, top, 0., h - bottom),
+        ];
+        for (l, t, r, btm) in parts {
+            if l + r >= w || t + btm >= h {
+                continue;
+            }
+            let sprite = self.compositor.CreateSpriteVisual().unwrap();
+            let _ = sprite.SetOffset(Vector3 { X: origin.X, Y: origin.Y, Z: 0. });
+            let _ = sprite.SetSize(Vector2 { X: w, Y: h });
+            let _ = sprite.SetBrush(&b);
+            if let Ok(clip) = self.compositor.CreateInsetClipWithInsets(l, t, r, btm) {
+                let _ = sprite.SetClip(&clip);
+            }
+            let _ = children.InsertAtTop(&sprite);
+        }
+    }
+
     /// Shows a rectangle with a border and rounded corners, of `size`, laid out like upstream's
     /// renderers lay it out (`BorderRectLayout`): one shape fills the background, another
     /// strokes the border. Without border or radius it's a plain [`Self::fill`].
