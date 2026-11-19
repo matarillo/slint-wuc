@@ -6,7 +6,6 @@ name = "i-slint-backend-testing"
 description = "Testing platform for the Slint runtime on Windows.UI.Composition"
 authors.workspace = true
 edition = "2024"
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true

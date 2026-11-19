@@ -6,7 +6,6 @@ name = "test_driver_lib"
 description = "Internal rust test driver"
 authors.workspace = true
 edition = "2024"
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true

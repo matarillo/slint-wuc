@@ -6,7 +6,6 @@ name = "i-slint-core-macros"
 description = "Helper macro for i-slint-core"
 authors.workspace = true
 edition = "2024"
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true

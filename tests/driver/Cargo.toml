@@ -7,7 +7,6 @@ description = "Runs the .slint test cases of upstream Slint on this runtime"
 authors.workspace = true
 # Keep an older edition to ensure the generated code is compatible with users that don't use the latest edition
 edition = "2021"
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true

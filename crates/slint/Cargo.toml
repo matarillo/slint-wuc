@@ -6,7 +6,6 @@ name = "slint"
 description = "Slint's Rust API on the Windows.UI.Composition runtime"
 authors.workspace = true
 edition = "2024"
-homepage.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
