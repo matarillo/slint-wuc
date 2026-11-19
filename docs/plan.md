@@ -208,7 +208,7 @@ Phase 0〜2 は Opus 中心、Phase 3 以降は Sonnet 中心 (各フェーズ�
 - Mica と、全機能のメニューバーの併用。ネイティブのメニューバーは GDI のリダイレクション面に描かれ、その面が Mica を隠す。Slint 描画のメニューバー (`SLINT_NO_MUDA`) なら Mica は出るが、Alt/F10 の入口と、メニューバーの項目の UI Automation の役割がない。候補は、ホストがコンポジションでメニューバーを描き、ドロップダウンを `TrackPopupMenuEx` で出すこと (L)。切り替え方 (環境変数か、フォーク独自の API か) も未定 (2026-11-19)。
 - コミット前に描いて壊したテキストのアトラスのページ。対策の候補は、解放をコミットの完了まで遅らせること (Phase 7)。
 - 将来の最適化: Slint のアニメーションの Composition アニメーションへの委譲。走査が 1 ms を超えるようなら dirty キュー方式に切り替える。ブラシを色ごとに共有するか。
-- 配布の長期の形。短期は git の依存と `[patch.crates-io]` の併記で公開する (2026-11-19、`README.md`)。別名での crates.io 公開と、ライセンスの表記 (フォークで変えた部分の著作権者など) は未定 (`docs/recommendations-after-phase7.md` の「配布の形の考え方」)。
+- 配布の長期の形。短期は git の依存と `[patch.crates-io]` の併記で公開する (2026-11-19、`README.md`)。ライセンスの表記も決めた (フォークの変更は Copyright © Kentaro Inomata、MIT-0、`docs/design/license.md`)。別名での crates.io 公開と、SixtyFPS に確かめること (改造版への Royalty-free の適用、有償ライセンスの範囲、名前の商標) は先送り (`docs/recommendations-after-phase7.md` の「積み残し」)。
 - core の doctest 51 件が失敗する。doc コメントの例が、core から見えない `slint` クレートを参照しているため。`cargo test --workspace --lib --bins --tests` は通る (2026-11-19 に確認)。
 - 言語バインディング (インタープリター、C++、Node、Python) の移植。順序と不足は `docs/design/bindings-gap.md`。除外中の 13 件はここに含まれる。
 
