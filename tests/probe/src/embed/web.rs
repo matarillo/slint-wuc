@@ -542,7 +542,7 @@ pub fn input_check(app: &Embed, dir: std::path::PathBuf) {
                 println!("after: {:?}", app.get_after_text());
                 // Click Slint's first text field, type, Tab into the page.
                 let s = app.window().scale_factor();
-                let y = 500. + 12. + app.get_scroll();
+                let y = 501. + 11. + app.get_scroll();
                 click((((20. + 10.) * s).round() as i32, (y * s).round() as i32));
             }),
         ),
