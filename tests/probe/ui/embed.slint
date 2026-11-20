@@ -113,7 +113,10 @@ export component Embed inherits Window {
             }
             web-focus := FocusScope {
                 focus-gained(reason) => {
-                    root.web-focus-gained(reason == FocusReason.tab-navigation);
+                    // The window's `WM_SETFOCUS` gives it on after an activation.
+                    if reason != FocusReason.window-activation {
+                        root.web-focus-gained(reason == FocusReason.tab-navigation);
+                    }
                 }
                 focus-lost(reason) => {
                     if reason != FocusReason.window-activation {

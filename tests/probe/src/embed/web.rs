@@ -63,7 +63,7 @@ addEventListener('wheel',e=>{s.wheel+=e.deltaY});
 addEventListener('keydown',e=>{s.keys+=e.key+' '});
 t.oninput=show;
 function show(){log.textContent=`clicks ${s.clicks} dbl ${s.dbl} downs ${s.downs.length} [${t.value}]`}
-window.state=()=>JSON.stringify({...s,value:t.value,scroll:d.scrollTop,
+window.state=()=>JSON.stringify({...s,value:t.value,sel:[t.selectionStart,t.selectionEnd],scroll:d.scrollTop,
  focus:document.activeElement.id||document.activeElement.tagName,hasFocus:document.hasFocus()});
 </script></body>"##;
 
@@ -73,6 +73,10 @@ struct Web {
     controller: ICoreWebView2Controller3,
     /// The `MK_` bits of the buttons held, as the item's pointer events report them.
     buttons: Cell<u32>,
+    /// Whether the item has Slint's focus, which a deactivation of the window keeps.
+    focused: Cell<bool>,
+    /// Where the item is in the window, in pixels, as the WebView2's bounds.
+    bounds: Cell<RECT>,
 }
 
 std::thread_local! {
@@ -187,7 +191,14 @@ fn show(
         controller.add_MoveFocusRequested(&move_focus, &mut token)?;
     }
     WEB.with(|web| {
-        *web.borrow_mut() = Some(Web { hwnd, composition, controller, buttons: Cell::new(0) })
+        *web.borrow_mut() = Some(Web {
+            hwnd,
+            composition,
+            controller,
+            buttons: Cell::new(0),
+            focused: Cell::new(false),
+            bounds: Cell::default(),
+        })
     });
     set_bounds(app);
     // Slint has no event for a move of the window; the popups need one.
@@ -208,6 +219,34 @@ pub fn close() {
     }
 }
 
+/// The signed coordinates of a mouse message.
+fn input_point(lp: LPARAM) -> POINT {
+    POINT {
+        x: (lp.0 & 0xffff) as u16 as i16 as i32,
+        y: ((lp.0 >> 16) & 0xffff) as u16 as i16 as i32,
+    }
+}
+
+/// Closes the page's popups (menus, the list of a `select`) as a click outside them does: a
+/// click outside the bounds.
+fn close_popups() {
+    let outside = POINT { x: -10, y: -10 };
+    with_web(|web| unsafe {
+        let _ = web.composition.SendMouseInput(
+            COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_DOWN,
+            keys(MK_LBUTTON),
+            0,
+            outside,
+        );
+        let _ = web.composition.SendMouseInput(
+            COREWEBVIEW2_MOUSE_EVENT_KIND_LEFT_BUTTON_UP,
+            COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS_NONE,
+            0,
+            outside,
+        );
+    });
+}
+
 /// Tells the WebView2 that the window moved, so that its popups open at the page.
 unsafe extern "system" fn moved(
     hwnd: HWND,
@@ -222,6 +261,46 @@ unsafe extern "system" fn moved(
             let _ = web.controller.NotifyParentWindowPositionChanged();
         });
     }
+    // The page's popups don't see what happens outside the page: close them as a click outside
+    // them would, also when the window moves or loses the activation.
+    if std::env::var_os("PROBE_WEB_NO_CLOSE").is_none() {
+        let outside = || {
+            let mut p = input_point(lp);
+            if msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL {
+                unsafe {
+                    let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut p);
+                }
+            }
+            with_web(|web| {
+                let r = web.bounds.get();
+                !(r.left..r.right).contains(&p.x) || !(r.top..r.bottom).contains(&p.y)
+            })
+            .unwrap_or(false)
+        };
+        let close = match msg {
+            WM_NCLBUTTONDOWN | WM_NCRBUTTONDOWN | WM_NCMBUTTONDOWN => true,
+            WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                outside()
+            }
+            WM_ACTIVATE => (wp.0 & 0xffff) as u32 == WA_INACTIVE,
+            _ => false,
+        };
+        // Only while the page has the focus, as its popups do: a click makes the WebView2 take
+        // the keyboard, also outside its bounds.
+        if close && with_web(|web| web.focused.get()).unwrap_or(false) {
+            close_popups();
+        }
+    }
+    // An activation gives the keyboard to the window (`DefWindowProc` of `WM_ACTIVATE`), after
+    // Slint gave the item its focus back: give it on to the WebView2.
+    if msg == WM_SETFOCUS && std::env::var_os("PROBE_WEB_NO_REFOCUS").is_none() {
+        with_web(|web| unsafe {
+            if web.focused.get() {
+                println!("web: the window got the keyboard, back to the WebView2");
+                let _ = web.controller.MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+            }
+        });
+    }
     unsafe { windows::Win32::UI::Shell::DefSubclassProc(hwnd, msg, wp, lp) }
 }
 
@@ -234,8 +313,10 @@ fn set_bounds(app: &Embed) {
     let (x, y) = if origin { (0., 0.) } else { (app.get_web_x(), app.get_web_y()) };
     let (x, y) = ((x * scale).round() as i32, (y * scale).round() as i32);
     let (w, h) = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
+    let bounds = RECT { left: x, top: y, right: x + w, bottom: y + h };
     with_web(|web| unsafe {
-        let _ = web.controller.SetBounds(RECT { left: x, top: y, right: x + w, bottom: y + h });
+        web.bounds.set(bounds);
+        let _ = web.controller.SetBounds(bounds);
     });
 }
 
@@ -285,6 +366,9 @@ fn connect(app: &Embed) {
     app.on_web_moved(move || {
         if let Some(app) = weak.upgrade() {
             set_bounds(&app);
+            if with_web(|web| web.focused.get()).unwrap_or(false) {
+                close_popups();
+            }
         }
     });
     app.on_web_focus_gained(|tab| {
@@ -296,6 +380,7 @@ fn connect(app: &Embed) {
                 (false, _) => COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC,
             };
             println!("web: focus gained, move focus {}", reason.0);
+            web.focused.set(true);
             unsafe {
                 let _ = web.controller.MoveFocus(reason);
             }
@@ -304,6 +389,7 @@ fn connect(app: &Embed) {
     app.on_web_focus_lost(|| {
         // The WebView2's window keeps the keyboard until the window takes it back.
         with_web(|web| unsafe {
+            web.focused.set(false);
             if GetFocus() != web.hwnd {
                 println!("web: focus lost, keyboard back to the window");
                 let _ = SetFocus(Some(web.hwnd));
@@ -568,6 +654,18 @@ pub fn input_check(app: &Embed, dir: std::path::PathBuf) {
                 let focus = unsafe { GetFocus() };
                 println!("focus after Tab from Slint's text field: {}", class_of(focus));
                 state(app, "after Tab into the page");
+                // As `DefWindowProc` does when the window is activated.
+                unsafe {
+                    let _ = SetFocus(Some(hwnd));
+                }
+            }),
+        ),
+        (
+            500,
+            Box::new(move |app| {
+                let focus = unsafe { GetFocus() };
+                println!("focus after SetFocus of the window: {}", class_of(focus));
+                state(app, "after SetFocus of the window");
                 app.set_scroll(-150.);
             }),
         ),
@@ -636,6 +734,84 @@ pub fn input_check(app: &Embed, dir: std::path::PathBuf) {
             Box::new(move |app| {
                 popups(app, hwnd, "the context menu", (250., 125.));
                 state(app, "after a right click");
+                // A click on Slint's content, outside the page: the window's subclass closes it.
+                click(at(app, -200., 0.));
+            }),
+        ),
+        (
+            500,
+            Box::new(move |app| {
+                popups(app, hwnd, "after closing the context menu", (250., 125.));
+                state(app, "after closing the context menu");
+                // Drag from the end of the text field to outside the item, on the left.
+                let from = at(app, 295., 56.);
+                post(hwnd, WM_MOUSEMOVE, 0, from);
+                post(hwnd, WM_LBUTTONDOWN, MK_LBUTTON as usize, from);
+            }),
+        ),
+        (
+            100,
+            Box::new(move |app| post(hwnd, WM_MOUSEMOVE, MK_LBUTTON as usize, at(app, 200., 56.))),
+        ),
+        (
+            100,
+            Box::new(move |app| post(hwnd, WM_MOUSEMOVE, MK_LBUTTON as usize, at(app, 150., 56.))),
+        ),
+        (
+            100,
+            Box::new(move |app| post(hwnd, WM_MOUSEMOVE, MK_LBUTTON as usize, at(app, -60., 56.))),
+        ),
+        (
+            300,
+            Box::new(move |app| {
+                state(app, "dragged out of the item, button still down");
+                post(hwnd, WM_LBUTTONUP, 0, at(app, -60., 56.));
+                post(hwnd, WM_MOUSEMOVE, 0, at(app, -60., 80.));
+            }),
+        ),
+        (
+            300,
+            Box::new(move |app| {
+                state(app, "after the release outside, and a move");
+                close_popups();
+            }),
+        ),
+        (
+            300,
+            Box::new(move |app| {
+                state(app, "after a click outside the bounds, with the text field focused");
+                let p = at(app, 250., 125.);
+                post(hwnd, WM_MOUSEMOVE, 0, p);
+                post(hwnd, WM_RBUTTONDOWN, MK_RBUTTON as usize, p);
+                post(hwnd, WM_RBUTTONUP, 0, p);
+            }),
+        ),
+        (
+            800,
+            Box::new(move |app| {
+                popups(app, hwnd, "the context menu again", (250., 125.));
+                // Slint's first text field, with the menu open.
+                let s = app.window().scale_factor();
+                let y = 501. + 11. + app.get_scroll();
+                click((((20. + 10.) * s).round() as i32, (y * s).round() as i32));
+            }),
+        ),
+        (
+            500,
+            Box::new(move |app| {
+                popups(app, hwnd, "after a click on Slint's text field", (250., 125.));
+                let focus = unsafe { GetFocus() };
+                println!(
+                    "focus after a click on Slint's text field, menu open: {}",
+                    class_of(focus)
+                );
+                post(focus, WM_CHAR, 'z' as usize, (0, 0));
+            }),
+        ),
+        (
+            300,
+            Box::new(move |app| {
+                println!("before: {:?}", app.get_before_text());
             }),
         ),
         (
