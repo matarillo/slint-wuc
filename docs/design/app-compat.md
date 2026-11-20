@@ -93,6 +93,8 @@ Timed per message around the event loop, three slides each:
 With the text left as drawn when only its row's width changes, the sync pass takes 3.6–5.9 ms instead of 5–7; 42 to 55 of the 57 texts keep their drawing; the others move with the width, as a centered text does.
 A frame now takes 12–15 ms, of which the accessibility update is 5–7 ms.
 
+Tried and dropped: updating accessibility at most every 100 ms while an animation runs. Each update then took 9–11 ms at once, so a frame was missed every 100 ms, with 2–6 steps over 20 ms per slide instead of 1–4; the sync pass and the tick also took 1–2 ms more (cause not looked into).
+
 ## Fixed
 
 - `Window::set_position` before `show()` was dropped: the window has no HWND yet, and was created at `CW_USEDEFAULT`.
