@@ -64,6 +64,10 @@ In both ways:
 
 ## Compared with upstream
 
+- Of upstream 1.19.0's Rust examples and demos, 22 build, start and draw unchanged. The others
+  use an API the fork removed (OpenGL textures, wgpu, `BackendSelector`, a platform of their
+  own), need libraries that weren't installed (FFmpeg), or don't build on upstream either.
+  The list is in `docs/design/upstream-examples.md`.
 - Upstream's features that choose a backend, a renderer or a platform option (`backend-winit`,
   `renderer-skia`, `renderer-software`, ...) are accepted and do nothing. Upstream's features
   that bring an API of their own (`unstable-*`, `live-preview`, `system-testing`) are absent, so
@@ -151,8 +155,8 @@ Without them, these fail:
   `tests/driver` (upstream's `tests/cases`) and `tests/screenshots` (upstream's reference images).
   `cargo build -p slint` doesn't need them.
 - the tests of `tools/cpp-headers`, and `tools/upstream-gallery`
-- `tools/upstream-examples.ps1`, which builds upstream's examples, unmodified, on the fork both
-  as a git dependency and as a patch
+- `tools/upstream-examples.ps1`, which builds and launches upstream's Rust examples and demos,
+  unmodified, on the fork, and captures their windows
 
 Build and test from PowerShell, where cargo finds the MSVC linker.
 
