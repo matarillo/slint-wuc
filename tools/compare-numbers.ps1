@@ -12,23 +12,39 @@
 # messages again), wait -Settle seconds, read memory, then read the CPU time used over -Idle
 # seconds. The first run of each is a warm-up and isn't counted.
 #
+# -Exe measures any executables instead, so a real application can be compared without a probe of
+# it. The process is killed at the end of each run, so the app has to keep running for -Settle +
+# -Idle seconds after its window shows (a screenshot timer needs a long delay); one that quits
+# earlier stops the run with an error rather than report garbage.
+#
 # Build first (release, as a user ships it):
 #   cargo build --release -p slint-fork-probe --bin probe-gallery --bin probe-titlebar
 #   cd tools/upstream-gallery; cargo build --release --bin upstream-gallery --bin upstream-titlebar
 # Usage: tools/compare-numbers.ps1 [-Runs 5] [-Settle 3] [-Idle 10] [-Apps gallery,titlebar]
+#   tools/compare-numbers.ps1 -Scene splash `
+#       -Exe fork=F:\a\slokk.exe,upstream=F:\b\slokk.exe,"upstream-sw=F:\b\slokk.exe|SLINT_BACKEND=winit-software" `
+#       -Arguments --screenshot,NUL,--phase,splash,--delay,600000 -Env SLINT_SCALE_FACTOR=1
+# -Exe is side=path, and `|NAME=VALUE` after the path sets variables for that side only; -Env sets
+# them for every side. -Scene names the app in the tables. -Arguments are passed one item each, so
+# a path with spaces survives (needs PowerShell 7). The app starts in the directory of its exe, as
+# it may load files relative to it; -WorkingDirectory overrides that.
 # Windows open in the foreground while it runs; leave the desktop alone.
+[CmdletBinding(DefaultParameterSetName = 'Builtin')]
 param(
     [int] $Runs = 5,
     [double] $Settle = 3,
     [double] $Idle = 10,
+    # Ignored with -Exe.
     [ValidateSet('gallery', 'titlebar')] [string[]] $Apps = @('gallery', 'titlebar'),
+    [Parameter(ParameterSetName = 'Exe', Mandatory)] [string[]] $Exe,
+    [Parameter(ParameterSetName = 'Exe', Mandatory)] [string] $Scene,
+    [Parameter(ParameterSetName = 'Exe')] [string[]] $Arguments,
+    [Parameter(ParameterSetName = 'Exe')] [string] $WorkingDirectory,
+    [Parameter(ParameterSetName = 'Exe')] [string[]] $Env,
     [string] $Out
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
-$target = (cargo metadata --format-version 1 --no-deps --manifest-path (Join-Path $repo 'Cargo.toml') |
-    ConvertFrom-Json).target_directory
-$release = Join-Path $target 'release'
 
 Add-Type -TypeDefinition @'
 using System;
@@ -76,13 +92,34 @@ $sides = @(
     @{ Side = 'upstream-sw'; Prefix = 'upstream'; Env = @{ SLINT_BACKEND = 'winit-software' } }
 )
 
-function Measure-Once($exe, $envVars) {
+function ConvertTo-EnvTable($pairs, $what) {
+    $table = [ordered]@{}
+    foreach ($pair in $pairs) {
+        $name, $value = $pair -split '=', 2
+        if (-not $name -or $null -eq $value) { throw "$what '$pair' isn't NAME=VALUE" }
+        $table[$name] = $value
+    }
+    $table
+}
+
+# An app that quit by itself (a screenshot timer, say) leaves nothing to read memory or CPU from.
+function Assert-Running($p, $job) {
+    if ($p.HasExited) {
+        throw "$($job.Side) ($($job.Exe)) exited by itself with code $($p.ExitCode) before the idle window ended; it has to keep running for -Settle + -Idle seconds after its window shows"
+    }
+}
+
+# $job: App, Side, Exe, Env (name -> value), Args, Cwd (null: inherit ours).
+function Measure-Once($job) {
+    $exe = $job.Exe
     $saved = @{}
-    foreach ($k in $envVars.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $envVars[$k]) }
+    foreach ($k in $job.Env.Keys) { $saved[$k] = [Environment]::GetEnvironmentVariable($k); [Environment]::SetEnvironmentVariable($k, $job.Env[$k]) }
     try {
         $info = [Diagnostics.ProcessStartInfo]::new($exe)
         $info.UseShellExecute = $false
         $info.CreateNoWindow = $true
+        foreach ($a in $job.Args) { $info.ArgumentList.Add($a) }
+        if ($job.Cwd) { $info.WorkingDirectory = $job.Cwd }
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $p = [Diagnostics.Process]::Start($info)
     } finally {
@@ -92,6 +129,7 @@ function Measure-Once($exe, $envVars) {
         $visible, $answered = [NumbersProbe]::WaitReady($p.Id, $clock, 20000)
         if ($answered -lt 0) { throw "$exe showed no window, or it didn't answer, in 20 s" }
         Start-Sleep -Milliseconds ([int]($Settle * 1000))
+        Assert-Running $p $job
         $p.Refresh()
         $ws = $p.WorkingSet64; $private = $p.PrivateMemorySize64; $threads = $p.Threads.Count
         $gpu = try {
@@ -102,6 +140,7 @@ function Measure-Once($exe, $envVars) {
         } catch { @($null, $null) }
         $p.Refresh(); $cpu0 = $p.TotalProcessorTime; $t0 = $clock.Elapsed
         Start-Sleep -Milliseconds ([int]($Idle * 1000))
+        Assert-Running $p $job
         $p.Refresh(); $cpu1 = $p.TotalProcessorTime; $t1 = $clock.Elapsed
         [pscustomobject]@{
             VisibleMs = [math]::Round($visible, 1)
@@ -119,18 +158,51 @@ function Measure-Once($exe, $envVars) {
     }
 }
 
-$rows = foreach ($app in $Apps) {
-    foreach ($s in $sides) {
-        $exe = Join-Path $release "$($s.Prefix)-$app.exe"
-        if (-not (Test-Path $exe)) { throw "$exe isn't built (see the build commands at the top)" }
-        Write-Host "$app / $($s.Side): warm-up + $Runs runs"
-        $null = Measure-Once $exe $s.Env
-        for ($i = 1; $i -le $Runs; $i++) {
-            $r = Measure-Once $exe $s.Env
-            $r | Add-Member -NotePropertyName App -NotePropertyValue $app -PassThru |
-                Add-Member -NotePropertyName Side -NotePropertyValue $s.Side -PassThru |
-                Add-Member -NotePropertyName Run -NotePropertyValue $i -PassThru
+if ($PSCmdlet.ParameterSetName -eq 'Exe') {
+    $common = ConvertTo-EnvTable $Env '-Env entry'
+    $cwd = $null
+    if ($WorkingDirectory) {
+        if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) { throw "-WorkingDirectory $WorkingDirectory doesn't exist" }
+        $cwd = (Resolve-Path -LiteralPath $WorkingDirectory).Path
+    }
+    $seen = @{}
+    $jobs = @(foreach ($entry in $Exe) {
+        $side, $spec = $entry -split '=', 2
+        if (-not $side -or -not $spec) { throw "-Exe entry '$entry' isn't side=path[|NAME=VALUE...]" }
+        if ($seen.ContainsKey($side)) { throw "-Exe has the side '$side' twice; the tables would merge them" }
+        $seen[$side] = $true
+        $path, $own = $spec -split '\|'
+        # Checked for all sides before the first run, so a typo doesn't cost the measurements before it.
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "-Exe $side`: $path doesn't exist" }
+        # A relative path would be read against the working directory of the process, not ours.
+        $full = (Resolve-Path -LiteralPath $path).Path
+        $envVars = [ordered]@{}
+        foreach ($table in $common, (ConvertTo-EnvTable $own "-Exe $side env")) {
+            foreach ($k in $table.Keys) { $envVars[$k] = $table[$k] }
         }
+        @{ App = $Scene; Side = $side; Exe = $full; Env = $envVars; Args = $Arguments; Cwd = if ($cwd) { $cwd } else { Split-Path -Parent $full } }
+    })
+} else {
+    $target = (cargo metadata --format-version 1 --no-deps --manifest-path (Join-Path $repo 'Cargo.toml') |
+        ConvertFrom-Json).target_directory
+    $release = Join-Path $target 'release'
+    $jobs = @(foreach ($app in $Apps) {
+        foreach ($s in $sides) {
+            $exe = Join-Path $release "$($s.Prefix)-$app.exe"
+            if (-not (Test-Path $exe)) { throw "$exe isn't built (see the build commands at the top)" }
+            @{ App = $app; Side = $s.Side; Exe = $exe; Env = $s.Env; Args = @(); Cwd = $null }
+        }
+    })
+}
+
+$rows = foreach ($job in $jobs) {
+    Write-Host "$($job.App) / $($job.Side): warm-up + $Runs runs"
+    $null = Measure-Once $job
+    for ($i = 1; $i -le $Runs; $i++) {
+        $r = Measure-Once $job
+        $r | Add-Member -NotePropertyName App -NotePropertyValue $job.App -PassThru |
+            Add-Member -NotePropertyName Side -NotePropertyValue $job.Side -PassThru |
+            Add-Member -NotePropertyName Run -NotePropertyValue $i -PassThru
     }
 }
 

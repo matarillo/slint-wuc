@@ -46,6 +46,9 @@ slint = { git = "https://github.com/matarillo/slint-wuc", tag = "v1.19.0-wuc.1" 
 To go back to upstream, remove `[patch.crates-io]`.
 
 - A patch works only in the top-level `Cargo.toml` of the application or workspace.
+- With an existing `Cargo.lock` that names an older `slint`, adding the patch alone keeps the
+  locked one. Changing `slint-build` to `"=1.19.0"` at the same time makes Cargo resolve again,
+  and it picks the fork; `slint = "1.18"` may stay. `cargo tree -i slint` shows which one it is.
 - When the version in `[dependencies]` doesn't accept 1.19.0 (`"1.20"`, say), Cargo only warns
   that the patch was not used, and builds with upstream's `slint`. Check that
   `cargo tree -i slint` shows the fork.
@@ -127,6 +130,11 @@ setup and what isn't measured are in `docs/design/costs.md`):
 Starting Direct3D, Direct2D, DirectWrite and Composition costs about 60 ms and 40 MB over the
 software renderer. Upstream's default uses more memory here mostly for its OpenGL driver, which
 varies with the GPU. What the fork gives for that cost is the Windows integration above.
+
+A real application costs more than the gallery. In a contacts app with large images
+(`docs/design/app-compat.md`), the fork's window shows 60 ms after upstream's, it holds 128 MB
+of private memory (upstream 199–259 MB, software 35 MB), and an animation that rebuilds a `Path`
+every frame takes 22 % of a core (upstream 10 %, software 21 %).
 
 ## Developing the fork
 

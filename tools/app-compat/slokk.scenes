@@ -1,0 +1,26 @@
+# Copyright © Kentaro Inomata
+# SPDX-License-Identifier: MIT-0
+#
+# Scenes of slokk-slint for tools/app-compat.ps1: one per line, a name and the arguments to give
+# the application's `--screenshot <file>` (its `screenshot` feature). The window is 1280x820
+# unless a scene says otherwise. Contact ids are c000 and up.
+
+splash          --phase splash
+welcome-1       --phase welcome --step 1
+# The user code is random per run, so a diff in the code text is expected.
+welcome-2       --phase welcome --step 2
+dashboard
+dashboard-dark  --dark
+contacts        --page-name contacts
+contacts-dark   --page-name contacts --dark
+contact-info    --page-name contacts --select c006
+contact-info-dark --page-name contacts --select c006 --dark
+contact-social  --page-name contacts --select c006 --panel social
+contact-edit    --page-name contacts --select c006 --panel edit
+bulk-edit       --page-name contacts --check c001,c002,c003
+search-hit      --page-name contacts --search ingrid
+search-empty    --page-name contacts --search zzzz
+# Narrower than 768 px, where the menu becomes a drawer.
+narrow-700      --size 700x820 --page-name contacts
+mid-1000        --size 1000x820 --page-name contacts --select c006
+wide-1600       --size 1600x900 --page-name contacts

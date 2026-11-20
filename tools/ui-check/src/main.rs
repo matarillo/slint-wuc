@@ -15,6 +15,13 @@
 //! snapshots do.
 //! The images go to `manual-checks/ui-check/<scenario>/`, with `report.tsv` listing how much each
 //! step differs.
+//!
+//! ```text
+//! cargo run -p ui-check -- compare <a.png> <b.png> <out.png>
+//! ```
+//!
+//! compares two screenshots taken elsewhere (`tools/app-compat.ps1` does): `a` takes upstream's
+//! place in the output image. It prints the two percentages, over 16 and over 64, tab separated.
 
 mod app;
 mod compare;
@@ -89,7 +96,30 @@ fn run(side: Side, scenario: &scenarios::Scenario) -> Result<Vec<Vec<u8>>, Strin
     Ok(shots)
 }
 
+/// `ui-check compare <a.png> <b.png> <out.png>`: no gallery involved, so a script can compare
+/// the screenshots of any two programs.
+fn compare_files(args: &[String]) -> Result<(), String> {
+    let [a, b, out] = args else {
+        return Err("usage: ui-check compare <a.png> <b.png> <out.png>".into());
+    };
+    let load = |path: &String| {
+        image::open(path).map(|image| image.to_rgba8()).map_err(|e| format!("{path}: {e}"))
+    };
+    let comparison = compare::compare(&load(a)?, &load(b)?);
+    comparison.image.save(out).map_err(|e| format!("{out}: {e}"))?;
+    println!("{:.3}\t{:.3}", comparison.over_16, comparison.over_64);
+    Ok(())
+}
+
 fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("compare") {
+        if let Err(e) = compare_files(&args[1..]) {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut sides = vec![Side::Upstream, Side::Fork];
     let mut names = Vec::new();
