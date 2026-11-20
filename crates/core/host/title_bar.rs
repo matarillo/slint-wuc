@@ -29,6 +29,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 pub(super) const WM_APP_TITLE_BAR: u32 = super::WM_APP + 8;
 /// Opens the system menu at the screen point in `lParam`.
 pub(super) const WM_APP_SYSTEM_MENU: u32 = super::WM_APP + 9;
+/// Carries out the system command in `wParam`, `SC_MAXIMIZE` or `SC_RESTORE`, once the press
+/// that asked for it is over.
+pub(super) const WM_APP_TOGGLE_MAXIMIZED: u32 = super::WM_APP + 10;
 
 /// The title bar of a window whose content extends into it, in logical pixels of the
 /// content's coordinates.
@@ -286,7 +289,12 @@ impl Win32WindowAdapter {
         let command = if unsafe { IsZoomed(hwnd).as_bool() } { SC_RESTORE } else { SC_MAXIMIZE };
         // Posted: the core is dispatching the press.
         unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(command as usize), LPARAM(0));
+            let _ = PostMessageW(
+                Some(hwnd),
+                WM_APP_TOGGLE_MAXIMIZED,
+                WPARAM(command as usize),
+                LPARAM(0),
+            );
         }
     }
 

@@ -4,6 +4,7 @@
 //! Mouse input: Win32 mouse messages become the pointer events of the window
 //! (`docs/design/input.md`).
 
+use super::title_bar::WM_APP_TOGGLE_MAXIMIZED;
 use super::{WM_APP_WINDOW_MOVE, Win32WindowAdapter};
 use crate::input::{BackendMouseEvent, TouchPhase};
 use crate::items::{BuiltInMouseCursor, PointerEventButton};
@@ -182,6 +183,21 @@ pub(super) fn handle(
                     // Returns when the button is released.
                     SendMessageW(hwnd, WM_NCLBUTTONDOWN, Some(WPARAM(HTCAPTION as usize)), None);
                 }
+            }
+            Some(LRESULT(0))
+        }
+        WM_APP_TOGGLE_MAXIMIZED => {
+            // The system ignores `SC_MAXIMIZE` and `SC_RESTORE` while the window holds the
+            // mouse, as it does while the button of the double click is down (2026-11-20, by
+            // hand), so the press ends here, as for a move.
+            if mouse.buttons.replace(0) != 0 {
+                dispatch(BackendMouseEvent::Exit);
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+            }
+            unsafe {
+                SendMessageW(hwnd, WM_SYSCOMMAND, Some(wp), None);
             }
             Some(LRESULT(0))
         }
