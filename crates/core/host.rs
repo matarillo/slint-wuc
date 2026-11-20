@@ -73,6 +73,8 @@ const WM_APP_SYNC: u32 = WM_APP + 3;
 const WM_APP_FRAME: u32 = WM_APP + 4;
 /// Starts moving the window with the mouse; see `input::start_window_move`.
 const WM_APP_WINDOW_MOVE: u32 = WM_APP + 5;
+/// Ends a frame, after the sync passes that its [`WM_APP_FRAME`] posted.
+const WM_APP_FRAME_END: u32 = WM_APP + 6;
 const TIMER_SLINT: usize = 1;
 
 /// The platform of a UI thread: its event loop and the services `SlintContext` asks for.
@@ -116,6 +118,8 @@ impl Frames {
 std::thread_local! {
     /// The frames of this thread's `Platform`.
     static FRAMES: core::cell::OnceCell<Arc<Frames>> = const { core::cell::OnceCell::new() };
+    /// Set from a [`WM_APP_FRAME`] until its [`WM_APP_FRAME_END`].
+    static IN_FRAME: Cell<bool> = const { Cell::new(false) };
 }
 
 fn request_frame() {
@@ -131,10 +135,12 @@ fn request_frame() {
 ///
 /// While frames tick, only [`WM_APP_FRAME`] moves the tick, which paces animations to the
 /// compositor clock. Moving it on every message would dirty animated properties and request
-/// another sync pass each time, and the loop would spin.
+/// another sync pass each time, and the loop would spin. Between a tick and its sync passes,
+/// `animating` is down but the frame isn't over: moving the tick there would evaluate the
+/// animated properties, and what depends on them, again before the sync passes draw them.
 fn update_timers() {
-    let frames_ticking =
-        FRAMES.with(|f| f.get().is_some_and(|f| f.animating.load(Ordering::Acquire)));
+    let frames_ticking = IN_FRAME.get()
+        || FRAMES.with(|f| f.get().is_some_and(|f| f.animating.load(Ordering::Acquire)));
     match crate::context::GLOBAL_CONTEXT.with(|ctx| ctx.get().cloned()) {
         Some(ctx) if frames_ticking => {
             let now = crate::animations::Instant::now(&ctx);
@@ -471,6 +477,15 @@ extern "system" fn message_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 }
             });
             crate::platform::update_timers_and_animations();
+            // The windows' sync passes were posted while the animations updated, so they come
+            // before the end of the frame.
+            IN_FRAME.set(
+                unsafe { PostMessageW(Some(hwnd), WM_APP_FRAME_END, WPARAM(0), LPARAM(0)) }.is_ok(),
+            );
+            LRESULT(0)
+        }
+        WM_APP_FRAME_END => {
+            IN_FRAME.set(false);
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER_SLINT => {

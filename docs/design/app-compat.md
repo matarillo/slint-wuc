@@ -55,10 +55,38 @@ The splash moves its edge from a `Timer` with the time since the last tick, clam
 The fork's ticks are as regular as upstream's (16.8 ms against 16.6 ms on average, at most 24 ms), but its first two come after 151 and 64 ms where upstream's come after 216 and 24 ms, and both lose the clamped time.
 After the same delay the fork's simulation is a few steps behind, so the shot shows another moment. Each side gives the same shot from run to run.
 
+## Owner's Checks
+
+On the fork's release build, 2026-11-20, on the same machine:
+
+- Japanese IME in the edit panel, and scrolling the contacts with the wheel: no problem.
+- The splash to the main screen: smooth.
+- The detail panel sliding in and out when a contact is selected: not smooth, as at a low frame rate. Upstream's is smooth.
+- Resizing by the window's edge: the fork redraws the whole window while dragging, but not smoothly. Upstream redraws the side menu and leaves the main area until the drag ends, so a hidden panel shows meanwhile. Which is right would need Flokk (the Flutter original) to compare; not done.
+
+### The Panel's Slide, Frame by Frame
+
+Traced on the fork with temporary timers (1280×820, scale 1). The slide animates the content's width, so every row of the list is laid out again in each frame:
+
+| Step, per frame | Time |
+|---|---|
+| The tick: animations, layout, change handlers | 2 ms |
+| Accessibility: rebuilding the 612 nodes whose bounds moved, after the tick | 7 ms |
+| The sync pass: text laid out and drawn again (57), box shadows redrawn (14), the walk over 3,082 items | 5–7 ms |
+| Accessibility again, after the sync pass (the list's repeater moves its rows while visited) | 3 ms |
+
+About 18 ms in all, more than a frame of 16.7 ms, so the panel moves every 17 to 23 ms, at times 30 ms, in uneven steps. DWM itself composes every frame, on both sides.
+
+- The accessibility work runs because a UI Automation client on the machine keeps the tree active (PowerToys, the text input host and the like run there; which one isn't known). Without one, a frame would take the other steps' 8 ms or so (not measured without a client).
+- Upstream's winit backend has the same accessibility code, so it may pay the same; not measured, as clicks posted to winit's window don't reach the app.
+- Resizing was not traced; it lays out the same list at every size, and is likely the same cost.
+
 ## Fixed
 
 - `Window::set_position` before `show()` was dropped: the window has no HWND yet, and was created at `CW_USEDEFAULT`.
   It is now kept and applied once the window exists, still hidden, as a size set before `show()` is (`tests/input/tests/window.rs`).
+- Between a frame's tick and its sync passes, the event loop moved the animation tick to the current time again, so the sync passes drew another moment than the tick and the animated properties were evaluated twice per frame.
+  A frame now lasts until a message posted after its sync passes. No test: it shows only in the timing of a real event loop.
 
 ## Numbers
 
