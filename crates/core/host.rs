@@ -692,6 +692,13 @@ impl Win32WindowAdapter {
         self.renderer.tree.borrow().node_count()
     }
 
+    /// The compositor of the window's visuals, as a borrowed `Windows.UI.Composition.Compositor`
+    /// pointer, valid while the window lives: the application makes the visuals it shows with
+    /// [`crate::visual_tree::image::external_visual_image`] with it. A spike for roadmap item 4.
+    pub fn compositor_abi(&self) -> *mut core::ffi::c_void {
+        self.renderer.tree.borrow().compositor().as_raw()
+    }
+
     /// The number of sync passes the window ran.
     pub fn sync_passes(&self) -> u64 {
         self.renderer.tree.borrow().passes()

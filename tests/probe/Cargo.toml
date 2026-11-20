@@ -71,6 +71,10 @@ path = "src/caption.rs"
 name = "probe-drop"
 path = "src/drop.rs"
 
+[[bin]]
+name = "probe-embed"
+path = "src/embed.rs"
+
 [dependencies]
 # `mcp` starts the MCP server when `SLINT_MCP_PORT` is set, for `tools/ui-check`.
 # `raw-window-handle-06`: for `probe-mica`, the HWND, as an application gets it from upstream.
@@ -83,7 +87,12 @@ i-slint-backend-testing = { path = "../../crates/testing", features = ["internal
 image = { workspace = true }
 # For `probe-perf`: process memory, handle and GDI/USER object counts, and process times.
 # For `probe-mica`: the system backdrop.
-windows = { workspace = true, features = ["Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+# For `probe-embed`: a D3D11 device and swap chain of its own, and the compositor's interop.
+windows = { workspace = true, features = ["UI_Composition", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT_Composition", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
+# For `probe-embed --web`: a WebView2 that draws into a visual of the window's compositor.
+webview2-com = "0.39"
+windows-numerics = "0.3"
 
 [build-dependencies]
 # The compiler is out of scope for this fork: the probe uses the published one, unmodified.

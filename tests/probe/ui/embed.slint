@@ -1,0 +1,101 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// Roadmap item 4: the application's swap chain shown in image items, under what Slint draws over
+// and around them. `probe-embed` sets the images; each shows the same 640x360 swap chain.
+export component Embed inherits Window {
+    title: "probe-embed";
+    width: 720px;
+    height: 560px;
+    background: #202020;
+    in property <image> plain;
+    in property <image> clipped;
+    in property <image> covered;
+    in property <image> web;
+    in-out property <length> scroll <=> flick.content-y;
+
+    flick := Flickable {
+        content-height: 1000px;
+
+        // A: as it is, stretched over the item.
+        Image {
+            x: 20px;
+            y: 20px;
+            width: 320px;
+            height: 180px;
+            source: root.plain;
+        }
+
+        // B: in a clip with rounded corners, at 60% opacity.
+        Rectangle {
+            x: 380px;
+            y: 20px;
+            width: 320px;
+            height: 180px;
+            border-radius: 40px;
+            clip: true;
+            opacity: 0.6;
+            Image {
+                width: 100%;
+                height: 100%;
+                source: root.clipped;
+            }
+        }
+
+        // C: fitted into a taller item, with a translucent rectangle and a text over it.
+        Rectangle {
+            x: 20px;
+            y: 240px;
+            width: 320px;
+            height: 240px;
+            background: #404040;
+            Image {
+                width: 100%;
+                height: 100%;
+                image-fit: contain;
+                source: root.covered;
+            }
+        }
+        // D: a WebView2 (`--web`) in a clip with rounded corners.
+        Rectangle {
+            x: 380px;
+            y: 280px;
+            width: 320px;
+            height: 240px;
+            border-radius: 16px;
+            clip: true;
+            background: #404040;
+            Image {
+                width: 100%;
+                height: 100%;
+                source: root.web;
+            }
+        }
+        Rectangle {
+            x: 200px;
+            y: 300px;
+            width: 300px;
+            height: 120px;
+            background: #ff000080;
+            Text {
+                text: "Slint over the swap chain";
+                color: white;
+                font-size: 20px;
+            }
+        }
+
+        Text {
+            x: 380px;
+            y: 240px;
+            text: "Below: more content to scroll.";
+            color: #c0c0c0;
+        }
+        Rectangle {
+            x: 20px;
+            y: 600px;
+            width: 680px;
+            height: 300px;
+            background: #305080;
+        }
+    }
+}

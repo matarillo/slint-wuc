@@ -39,6 +39,96 @@ use windows::Win32::System::WinRT::Composition::ICompositionDrawingSurfaceIntero
 use windows::core::Interface;
 use windows_numerics::{Matrix3x2, Vector2, Vector3};
 
+/// A composition visual that the application made and keeps drawing, such as a sprite with a
+/// swap chain's surface, shown where an image item is: the item places it by its `image-fit` and
+/// alignment, and clips it to the item.
+///
+/// A spike for roadmap item 4 (`docs/design/embedding.md`), not an API: a visual has only one
+/// parent, so the image shows in one item at a time.
+pub struct ExternalVisual {
+    visual: windows::UI::Composition::Visual,
+    size: IntSize,
+}
+
+impl crate::graphics::OpaqueImage for ExternalVisual {
+    fn size(&self) -> IntSize {
+        self.size
+    }
+    fn cache_key(&self) -> crate::graphics::ImageCacheKey {
+        crate::graphics::ImageCacheKey::Invalid
+    }
+}
+
+/// An image that shows `visual`, of `size` in pixels for the layout and `image-fit`.
+///
+/// # Safety
+///
+/// `visual` is a `Windows.UI.Composition.Visual` (any interface of it) of the window's
+/// compositor ([`crate::host::Win32WindowAdapter::compositor_abi`]), so that the application
+/// needs no `windows` crate of the same version. The image takes its own reference.
+pub unsafe fn external_visual_image(
+    visual: *mut core::ffi::c_void,
+    size: IntSize,
+) -> Option<Image> {
+    let unknown = unsafe { windows::core::IUnknown::from_raw_borrowed(&visual) }?;
+    let visual = unknown.cast::<windows::UI::Composition::Visual>().ok()?;
+    let rc = vtable::VRc::new(ExternalVisual { visual, size });
+    Some(Image(ImageInner::BackendStorage(vtable::VRc::into_dyn(rc))))
+}
+
+fn external(
+    source: &Image,
+) -> Option<vtable::VRc<crate::graphics::OpaqueImageVTable, ExternalVisual>> {
+    match <&ImageInner>::from(source) {
+        ImageInner::BackendStorage(storage) => vtable::VRc::downcast::<ExternalVisual>(storage),
+        _ => None,
+    }
+}
+
+/// Places the application's visual in a plain container below the node's children, cut to the
+/// item. Nothing here reads what the visual shows, so its content changes run no sync pass.
+fn update_external(
+    visual: &mut VisualUpdate<'_>,
+    image: Pin<&dyn RenderImage>,
+    external: &ExternalVisual,
+    size: LogicalSize,
+) -> windows::core::Result<()> {
+    let scale = visual.scale_factor();
+    let floor = visual.plain_floor();
+    floor.SetSize(Vector2 { X: size.width, Y: size.height })?;
+    if floor.Clip().is_err() {
+        floor.SetClip(&visual.compositor().CreateInsetClip()?)?;
+    }
+    let child = &external.visual;
+    if child.Parent().ok().as_ref() != Some(&floor) {
+        if let Ok(parent) = child.Parent() {
+            let _ = parent.Children()?.Remove(child);
+        }
+        let children = floor.Children()?;
+        children.RemoveAll()?;
+        children.InsertAtTop(child)?;
+    }
+    let source = image.source();
+    let target = size.cast::<f32>() * ScaleFactor::new(scale);
+    let Some(fit) = fits(image, &source, target, ScaleFactor::new(scale)).into_iter().next() else {
+        child.SetIsVisible(false)?;
+        return Ok(());
+    };
+    // The whole source scaled as the fit scales it, moved so that the fit's clip rectangle lands
+    // at the fit's offset; the floor's clip cuts off the rest. Tiling isn't supported.
+    let (sx, sy) = (fit.source_to_target_x, fit.source_to_target_y);
+    let x = fit.offset.x - fit.clip_rect.origin.x as f32 * sx;
+    let y = fit.offset.y - fit.clip_rect.origin.y as f32 * sy;
+    let full = source.size();
+    child.SetIsVisible(true)?;
+    child.SetOffset(Vector3 { X: x / scale, Y: y / scale, Z: 0. })?;
+    child.SetSize(Vector2 {
+        X: full.width as f32 * sx / scale,
+        Y: full.height as f32 * sy / scale,
+    })?;
+    Ok(())
+}
+
 /// Shows an `Image` or `ClippedImage`.
 pub fn update_image(
     visual: &mut VisualUpdate<'_>,
@@ -47,6 +137,12 @@ pub fn update_image(
     size: LogicalSize,
 ) {
     visual.plain();
+    if let Some(external) = external(&image.source()) {
+        if let Err(e) = update_external(visual, image, &external, size) {
+            crate::debug_log!("cannot show an external visual: {}", e.message());
+        }
+        return;
+    }
     if let Err(e) = update(visual, item_rc, image, size) {
         let code = e.code();
         if code == DXGI_ERROR_DEVICE_REMOVED

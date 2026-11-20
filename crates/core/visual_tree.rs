@@ -540,6 +540,22 @@ impl VisualUpdate<'_> {
         sprite
     }
 
+    /// A plain container below the node's children, for visuals the item doesn't own; made on
+    /// first use, and kept with its children otherwise.
+    pub(crate) fn plain_floor(&mut self) -> ContainerVisual {
+        let plain = |f: &&ContainerVisual| {
+            f.cast::<ShapeVisual>().is_err() && f.cast::<SpriteVisual>().is_err()
+        };
+        if let Some(floor) = self.floor.as_ref().filter(plain) {
+            return floor.clone();
+        }
+        self.remove_floor();
+        let floor = self.compositor.CreateContainerVisual().unwrap();
+        let _ = self.visual.Children().and_then(|c| c.InsertAtBottom(&floor));
+        *self.floor = Some(floor.clone());
+        floor
+    }
+
     /// What the item last drew into the floor's surface, as it left it with [`Self::set_drawn`]:
     /// `None` once the floor is replaced.
     pub(crate) fn drawn<T: 'static>(&self) -> Option<&T> {

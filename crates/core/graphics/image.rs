@@ -55,6 +55,11 @@ OpaqueImageVTable_static! {
     pub static ANIMATED_IMAGE_VT for AnimatedImage
 }
 
+OpaqueImageVTable_static! {
+    /// VTable for a composition visual that an application shows in an image item.
+    pub static EXTERNAL_VISUAL_VT for crate::visual_tree::image::ExternalVisual
+}
+
 /// SharedPixelBuffer is a container for storing image data as pixels. It is
 /// internally reference counted and cheap to clone.
 ///
