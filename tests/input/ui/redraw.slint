@@ -1,0 +1,61 @@
+// Copyright © Kentaro Inomata
+// SPDX-License-Identifier: MIT-0
+
+// Rows of text whose width follows a property, as the rows of a list whose width animates.
+export component RedrawTest inherits Window {
+    in property <length> row-width: 300px;
+    width: 320px;
+    height: 160px;
+    background: white;
+
+    Rectangle {
+        y: 0px;
+        width: root.row-width;
+        height: 30px;
+        Text {
+            x: 4px;
+            width: parent.width - 8px;
+            text: "Left aligned";
+            color: black;
+            font-size: 16px;
+        }
+    }
+
+    Rectangle {
+        y: 40px;
+        width: root.row-width;
+        height: 30px;
+        Text {
+            width: parent.width;
+            horizontal-alignment: center;
+            text: "Centered";
+            color: black;
+            font-size: 16px;
+        }
+    }
+
+    Rectangle {
+        y: 80px;
+        width: root.row-width;
+        height: 30px;
+        Text {
+            width: parent.width;
+            text: "A line of text that is elided when the row is narrow";
+            overflow: elide;
+            color: black;
+            font-size: 16px;
+        }
+    }
+
+    Rectangle {
+        y: 120px;
+        width: root.row-width;
+        height: 30px;
+        Text {
+            width: parent.width;
+            text: "Gradient across the row";
+            color: @linear-gradient(90deg, red, blue);
+            font-size: 16px;
+        }
+    }
+}

@@ -129,6 +129,7 @@ std::thread_local! {
 /// For work that reads what a frame moves, such as the accessibility bounds: run between the
 /// tick and the sync passes, it would see the tick's values, and the sync passes, which lay out
 /// repeated rows as they visit them, would make it run again.
+#[cfg_attr(not(feature = "accessibility"), allow(dead_code))]
 pub(crate) fn after_frame(f: impl FnOnce() + 'static) {
     if IN_FRAME.get() {
         AFTER_FRAME.with(|q| q.borrow_mut().push(Box::new(f)));

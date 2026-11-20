@@ -88,6 +88,10 @@ Timed per message around the event loop, three slides each:
 |---|---|---|
 | Before | 18.1–21.6 ms | 6–13 of 20–24 |
 | Once per frame | 16.9–18.0 ms | 2–5 of 23–25 |
+| And text left as drawn | 15.7–17.0 ms | 1–4 of 25–27 |
+
+With the text left as drawn when only its row's width changes, the sync pass takes 3.6–5.9 ms instead of 5–7; 42 to 55 of the 57 texts keep their drawing; the others move with the width, as a centered text does.
+A frame now takes 12–15 ms, of which the accessibility update is 5–7 ms.
 
 ## Fixed
 

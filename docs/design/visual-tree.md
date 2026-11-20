@@ -36,6 +36,7 @@ Text items keep upstream's layout: `textlayout/sharedparley` shapes and position
 - The surface covers what's drawn, not the item: an elided text keeps its last line even when it overflows the item, and alignment can put lines above it.
 - Color glyphs: COLRv1 paint trees (Segoe UI Emoji on Windows 11) need `IDWriteFactory8` and `ID2D1DeviceContext7::DrawPaintGlyphRun`. As in upstream's renderers, a translucent text color is the opacity of a color glyph as a whole, and a bitmap glyph stays upright in faux italic.
 - The content tracker sees what parley reads, including the scale factor. The cursor's blinking is a property too: it redraws the text input, which costs about 25 µs (S4).
+- An item that changes size updates even with a clean tracker, and a list whose width animates resizes every row in each frame. A text that records the same display list and bounds as last time, on the same device, isn't drawn again; for that, a solid color records no size and a clip is cut to the bounds. In slokk-slint's sliding panel, 42 to 55 of the 57 texts in a frame kept their drawing ([app-compat](app-compat.md)). A text that the width places, as a centered one, moves and is drawn again.
 - Devices: one D3D11, D2D and `CompositionGraphicsDevice` per UI thread. When the device is lost or replaced, every text and shadow node redraws.
   They are never released: the main thread's thread-locals are destroyed while the process exits, after the other threads have ended, and releasing the devices then can block forever.
 - `TextInput` updates the input method from `update_visual`, as upstream's `render` does, except for a read-only input, which disabled the input method when it got the focus.
@@ -120,6 +121,7 @@ The capture device is never released, like the drawing devices.
 - A property change requests one sync pass, coalesced until it runs.
 - A pass that finds active animations asks the frame thread (S1) for ticks on the compositor clock; each tick moves the animation tick to now, and the changes request the next pass.
 - While frames tick, only the frame tick moves the animation tick. The message loop still fires timers, but moving the animation tick on every message would request a pass per message and spin the loop.
+- A frame lasts from its tick until a message posted after the sync passes it requested. The accessibility update waits for the end (`host::after_frame`): run after the tick, it would read the bounds before the passes lay out repeated rows, and run again after them.
 - With no animation nothing runs, and the message loop keeps the animation tick current, so that a new animation starts from now.
 - The root visual carries the scale factor; the compositor snaps axis-aligned edges (S2).
 

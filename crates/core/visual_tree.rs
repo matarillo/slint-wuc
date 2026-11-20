@@ -84,6 +84,9 @@ struct Node {
     /// The visual of the item's own content, below the children's visuals: a sprite (text,
     /// images, effects) or a shape visual.
     floor: Option<ContainerVisual>,
+    /// What the item last drew into the floor's surface, kept by the item's module so that it
+    /// can leave the surface alone when it would draw the same again.
+    drawn: Option<Box<dyn core::any::Any>>,
     /// The pass that last visited this node.
     pass: u64,
     /// The parent node as of that pass; `None` for the root of an item tree.
@@ -101,6 +104,7 @@ pub struct VisualUpdate<'a> {
     visual: &'a mut ContainerVisual,
     kind: &'a mut VisualKind,
     floor: &'a mut Option<ContainerVisual>,
+    drawn: &'a mut Option<Box<dyn core::any::Any>>,
 }
 
 impl VisualUpdate<'_> {
@@ -536,8 +540,19 @@ impl VisualUpdate<'_> {
         sprite
     }
 
+    /// What the item last drew into the floor's surface, as it left it with [`Self::set_drawn`]:
+    /// `None` once the floor is replaced.
+    pub(crate) fn drawn<T: 'static>(&self) -> Option<&T> {
+        self.drawn.as_ref()?.downcast_ref()
+    }
+
+    pub(crate) fn set_drawn(&mut self, drawn: Option<Box<dyn core::any::Any>>) {
+        *self.drawn = drawn;
+    }
+
     /// Drops the visual of the item's own content, if there is one.
     pub(crate) fn remove_floor(&mut self) {
+        *self.drawn = None;
         if let Some(floor) = self.floor.take() {
             let _ = self.visual.Children().and_then(|c| c.Remove(&floor));
         }
@@ -656,6 +671,7 @@ impl VisualTree {
             children: Vec::new(),
             next_children: Vec::new(),
             floor: None,
+            drawn: None,
             pass: 0,
             parent: None,
             serial: self.created,
@@ -731,7 +747,7 @@ impl VisualTree {
                     });
                     node.geometry = Some(geometry);
                 }
-                let Node { visual, kind, content, result, floor, .. } = node;
+                let Node { visual, kind, content, result, floor, drawn, .. } = node;
                 if content.is_dirty() || resized {
                     let mut update = VisualUpdate {
                         compositor: &self.compositor,
@@ -739,6 +755,7 @@ impl VisualTree {
                         visual,
                         kind,
                         floor,
+                        drawn,
                     };
                     *result = content.as_ref().evaluate(|| {
                         item.as_ref().update_visual(&item_rc, &mut update, geometry.size)
@@ -1656,12 +1673,14 @@ mod tests {
         let mut visual = c.CreateContainerVisual().unwrap();
         let mut kind = VisualKind::Container;
         let mut floor = None;
+        let mut drawn = None;
         let mut update = VisualUpdate {
             compositor: &c,
             item: None,
             visual: &mut visual,
             kind: &mut kind,
             floor: &mut floor,
+            drawn: &mut drawn,
         };
         let size = LogicalSize::new(30., 20.);
         update.transform(90., 1., 1., LogicalPoint::default());

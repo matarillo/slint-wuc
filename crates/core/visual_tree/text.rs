@@ -97,17 +97,57 @@ fn update(
         visual.remove_floor();
         return;
     };
+    // The surface covers only the bounds, so a clip counts only within them; cut to them, the
+    // clip of an item that only changes size stays the same (see [`Drawn`]).
+    for command in &mut recorder.commands {
+        if let Command::PushClip(rect) = command {
+            *rect = rect.intersection(&bounds).unwrap_or_default();
+        }
+    }
 
     let sprite = visual.surface_sprite();
-    if let Err(e) = draw(&graphics, &sprite, &recorder.commands, bounds, scale) {
-        graphics.drawing_failed(&e, "text");
+    let device = graphics.device_generation();
+    let unchanged = visual.drawn::<Drawn>().is_some_and(|drawn| {
+        drawn.bounds == bounds
+            && drawn.scale == scale
+            && drawn.device == device
+            && drawn.commands == recorder.commands
+    });
+    if unchanged {
+        return;
+    }
+    match draw(&graphics, &sprite, &recorder.commands, bounds, scale) {
+        Ok(()) => visual.set_drawn(Some(alloc::boxed::Box::new(Drawn {
+            commands: recorder.commands,
+            bounds,
+            scale,
+            device,
+        }))),
+        Err(e) => {
+            visual.set_drawn(None);
+            graphics.drawing_failed(&e, "text");
+        }
     }
     let _ =
         sprite.SetOffset(Vector3 { X: bounds.origin.x / scale, Y: bounds.origin.y / scale, Z: 0. });
     let _ = sprite.SetSize(Vector2 { X: bounds.width() / scale, Y: bounds.height() / scale });
 }
 
+/// What a text item last drew into its surface.
+///
+/// An item that only changes size, as the rows of a list whose width animates, usually draws
+/// the same glyphs at the same places, and drawing them again was a large part of the frame.
+/// Text placed by the item's width (centered, right-aligned, wrapped) moves and is drawn again.
+struct Drawn {
+    commands: Vec<Command>,
+    bounds: PhysicalRect,
+    scale: f32,
+    /// The device generation: a new device has lost the surface's content.
+    device: u64,
+}
+
 /// What the recording renderer was asked to draw, in physical pixels relative to the item.
+#[derive(PartialEq)]
 enum Command {
     PushClip(PhysicalRect),
     PopClip,
@@ -128,7 +168,7 @@ enum Command {
 
 /// The recording renderer's brush: the item's brush and the size gradients span, in physical
 /// pixels.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct TextBrush {
     brush: Brush,
     size: PhysicalSize,
@@ -144,6 +184,15 @@ struct State {
     offset: LogicalVector,
     /// The clips pushed since this state was saved.
     clips: usize,
+}
+
+impl TextBrush {
+    fn new(brush: Brush, size: PhysicalSize, stroke: Option<f32>) -> Self {
+        // A color doesn't depend on the item's size, so that an item that only changes size
+        // records the same brush (see [`Drawn`]).
+        let size = if matches!(brush, Brush::SolidColor(_)) { PhysicalSize::zero() } else { size };
+        Self { brush, size, stroke }
+    }
 }
 
 /// An `ItemRenderer` and `GlyphRenderer` that records what upstream's text drawing asks for.
@@ -206,11 +255,7 @@ impl GlyphRenderer for Recorder<'_> {
     type PlatformBrush = TextBrush;
 
     fn platform_text_fill_brush(&mut self, brush: Brush, size: LogicalSize) -> Option<TextBrush> {
-        (!brush.is_transparent()).then(|| TextBrush {
-            brush,
-            size: size * self.scale,
-            stroke: None,
-        })
+        (!brush.is_transparent()).then(|| TextBrush::new(brush, size * self.scale, None))
     }
 
     fn platform_brush_for_color(&mut self, color: &Color) -> Option<TextBrush> {
@@ -227,11 +272,8 @@ impl GlyphRenderer for Recorder<'_> {
         physical_stroke_width: f32,
         size: LogicalSize,
     ) -> Option<TextBrush> {
-        (!brush.is_transparent()).then(|| TextBrush {
-            brush,
-            size: size * self.scale,
-            stroke: Some(physical_stroke_width),
-        })
+        (!brush.is_transparent())
+            .then(|| TextBrush::new(brush, size * self.scale, Some(physical_stroke_width)))
     }
 
     fn draw_glyph_run(
