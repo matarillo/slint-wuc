@@ -120,6 +120,28 @@ std::thread_local! {
     static FRAMES: core::cell::OnceCell<Arc<Frames>> = const { core::cell::OnceCell::new() };
     /// Set from a [`WM_APP_FRAME`] until its [`WM_APP_FRAME_END`].
     static IN_FRAME: Cell<bool> = const { Cell::new(false) };
+    /// What [`after_frame`] holds until the frame ends.
+    static AFTER_FRAME: RefCell<Vec<Box<dyn FnOnce()>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Runs `f` once the current frame's sync passes are done, or soon if no frame is under way.
+///
+/// For work that reads what a frame moves, such as the accessibility bounds: run between the
+/// tick and the sync passes, it would see the tick's values, and the sync passes, which lay out
+/// repeated rows as they visit them, would make it run again.
+pub(crate) fn after_frame(f: impl FnOnce() + 'static) {
+    if IN_FRAME.get() {
+        AFTER_FRAME.with(|q| q.borrow_mut().push(Box::new(f)));
+    } else {
+        crate::timers::Timer::single_shot(Default::default(), f);
+    }
+}
+
+fn end_frame() {
+    IN_FRAME.set(false);
+    for f in AFTER_FRAME.take() {
+        f();
+    }
 }
 
 fn request_frame() {
@@ -476,16 +498,19 @@ extern "system" fn message_wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                     frames.animating.store(false, Ordering::Release);
                 }
             });
+            // Up before the tick, so what the tick dirties waits for the frame's end too.
+            IN_FRAME.set(true);
             crate::platform::update_timers_and_animations();
             // The windows' sync passes were posted while the animations updated, so they come
             // before the end of the frame.
-            IN_FRAME.set(
-                unsafe { PostMessageW(Some(hwnd), WM_APP_FRAME_END, WPARAM(0), LPARAM(0)) }.is_ok(),
-            );
+            if unsafe { PostMessageW(Some(hwnd), WM_APP_FRAME_END, WPARAM(0), LPARAM(0)) }.is_err()
+            {
+                end_frame();
+            }
             LRESULT(0)
         }
         WM_APP_FRAME_END => {
-            IN_FRAME.set(false);
+            end_frame();
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER_SLINT => {

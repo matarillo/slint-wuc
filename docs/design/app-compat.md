@@ -81,6 +81,14 @@ About 18 ms in all, more than a frame of 16.7 ms, so the panel moves every 17 to
 - Upstream's winit backend has the same accessibility code, so it may pay the same; not measured, as clicks posted to winit's window don't reach the app.
 - Resizing was not traced; it lays out the same list at every size, and is likely the same cost.
 
+The accessibility update now waits for the end of a frame, after its sync passes, so it runs once per frame (6–8 ms) and sees what the frame draws.
+Timed per message around the event loop, three slides each:
+
+| | Mean step | Steps over 20 ms |
+|---|---|---|
+| Before | 18.1–21.6 ms | 6–13 of 20–24 |
+| Once per frame | 16.9–18.0 ms | 2–5 of 23–25 |
+
 ## Fixed
 
 - `Window::set_position` before `show()` was dropped: the window has no HWND yet, and was created at `CW_USEDEFAULT`.

@@ -1224,7 +1224,8 @@ struct AccessibilityPropertyDirtyHandler {
 impl crate::properties::PropertyDirtyHandler for AccessibilityPropertyDirtyHandler {
     fn notify(self: Pin<&Self>) {
         let win = self.window_adapter_weak.clone();
-        crate::timers::Timer::single_shot(Default::default(), move || {
+        // Once per frame, after its layout and drawing: bounds move with animations.
+        super::after_frame(move || {
             with_access_kit_adapter(&win, |self_cell| {
                 self_cell.borrow_mut().rebuild_tree_of_dirty_nodes();
             });
