@@ -9,10 +9,9 @@ Nothing is clicked, so it shows that an application starts and draws its first s
 
 | Result | Examples and demos |
 |---|---|
-| Builds, starts and draws as upstream's code expects | 7guis (booker, cells, circledraw, crud), carousel, dnd-kanban, gallery, imagefilter, maps, memory, native-gestures, plotter, runtime_key_bindings, slide_puzzle, speedometer, system-tray, todo, todo-mvc, virtual_keyboard; demos energy-monitor, food-processor, home-automation, printerdemo, usecases, weather-demo |
+| Builds, starts and draws as upstream's code expects | 7guis (booker, cells, circledraw, crud), carousel, dnd-kanban, ffmpeg (below), gallery, imagefilter, maps, memory, native-gestures, plotter, runtime_key_bindings, slide_puzzle, speedometer, system-tray, todo, todo-mvc, virtual_keyboard; demos energy-monitor, food-processor, home-automation, printerdemo, usecases, weather-demo |
 | Uses an API the fork removed | opengl_texture (`BorrowedOpenGLTextureBuilder`, `BackendSelector`), opengl_underlay (`BackendSelector`), gstreamer-player (`BackendSelector` with OpenGL ES), wgpu_texture and bevy's three (`unstable-wgpu-30`; bevy-hosts-slint a platform of its own and `SoftwareRenderer`), servo (`unstable-wgpu-30`, `unstable-winit-030`, `slint` from upstream's git), launcher (`unstable-libinput-09`, for Linux KMS), analogclock (`mcu-board-support`, which depends on upstream's internal crates) |
 | Doesn't build on upstream either | async-io: its `serde` lacks the `derive` feature, which upstream's workspace supplies; built alone against upstream's crates.io release, it fails the same way |
-| Not tried | ffmpeg: needs the FFmpeg libraries, which aren't installed. It shows frames as `Image`s from pixel buffers, so it is expected to work (inferred) |
 
 Out of scope: the C++ examples, the microcontroller ones (`mcu-*`, `printerdemo_mcu`, `uefi-demo`, `safe-ui`), and the `.slint`-only examples, which upstream runs with `slint-viewer`.
 
@@ -20,6 +19,7 @@ No example showed a fork bug. Checked against upstream where a screen looked wro
 
 - slide_puzzle's reset button is the text `↻`, which the default font lacks; upstream's build shows the same missing-glyph box, since the fork keeps upstream's font fallback.
 - home-automation starts on its closed doors, a dark screen with a handle, as its `.slint` says.
+- ffmpeg plays a video from a fixed URL, which now answers 403, so upstream's build stops there as well. Pointed at a local 30 fps test video instead (a copy of the example with that one string changed), it plays on the fork without dropping a frame: frame 169 at 5.633 s. Building it needs the FFmpeg 9.1 libraries (`FFMPEG_DIR`) and libclang (`LIBCLANG_PATH`).
 - The gallery's About page draws `AboutSlint` (logo, "#MadeWithSlint", version, URL), which Royalty-free 2.0 asks for.
 
 ## What the Rewrite Does

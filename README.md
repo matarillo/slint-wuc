@@ -64,10 +64,9 @@ In both ways:
 
 ## Compared with upstream
 
-- Of upstream 1.19.0's Rust examples and demos, 22 build, start and draw unchanged. The others
+- Of upstream 1.19.0's Rust examples and demos, 23 build, start and draw unchanged. The others
   use an API the fork removed (OpenGL textures, wgpu, `BackendSelector`, a platform of their
-  own), need libraries that weren't installed (FFmpeg), or don't build on upstream either.
-  The list is in `docs/design/upstream-examples.md`.
+  own), or don't build on upstream either. The list is in `docs/design/upstream-examples.md`.
 - Upstream's features that choose a backend, a renderer or a platform option (`backend-winit`,
   `renderer-skia`, `renderer-software`, ...) are accepted and do nothing. Upstream's features
   that bring an API of their own (`unstable-*`, `live-preview`, `system-testing`) are absent, so

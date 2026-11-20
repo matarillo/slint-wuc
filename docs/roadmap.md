@@ -6,7 +6,7 @@
 
 ## 主張と費用
 
-- 上流の `.slint` と Rust のコードが、手を入れずに動く。上流のテストケース、gallery、プローブ、上流の Rust の example と demo (22 個が起動して描け、残りは外した API か環境か上流自身の不備)、実際のアプリ 1 つ (slokk-slint。`Cargo.toml` の 2 行で動き、画面はレイアウトが同じ) で確かめた【確認、`docs/design/upstream-examples.md`、`docs/design/app-compat.md`】。
+- 上流の `.slint` と Rust のコードが、手を入れずに動く。上流のテストケース、gallery、プローブ、上流の Rust の example と demo (23 個が起動して描け、残りは外した API か上流自身の不備)、実際のアプリ 1 つ (slokk-slint。`Cargo.toml` の 2 行で動き、画面はレイアウトが同じ) で確かめた【確認、`docs/design/upstream-examples.md`、`docs/design/app-compat.md`】。
 - 上流の winit にまだない Windows の統合 (窓の外に出るポップアップ、ダークなメニュー、ドロップの受け側、タイトルバーへの統合)【確認、`docs/design/windows.md`】。どれも上流の winit への変更でも実現でき、言えるのは「今使える」まで。
 - フォークでなければならない理由は、UI が Composition のビジュアルツリーであることだけで、まだ実証していない。上流にも動画、Web、3D を `Image` で混ぜる例があり (`examples/ffmpeg`、`servo`)【確認】、wgpu 連携を外したフォークはその点で後ろにいる。
 - 費用: 速くも軽くもない (`docs/design/costs.md`)。実際のアプリでは gallery より重く、窓が上流より 60 ms 遅れて出て、private メモリは 128 MB、毎フレーム `Path` を作り直すアニメーションの CPU は上流の 2.3 倍【確認、`docs/design/app-compat.md`】。Rust だけ、Windows 11 22H2 以降、`=1.19.0` に固定、保守する人は 1 人。
