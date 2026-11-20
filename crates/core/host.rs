@@ -515,6 +515,8 @@ pub struct Win32WindowAdapter {
     size: Cell<PhysicalSize>,
     /// A size set before the HWND exists, applied once its scale factor is known.
     requested_size: Cell<Option<WindowSize>>,
+    /// A position set before the HWND exists, applied as `requested_size` is.
+    requested_position: Cell<Option<WindowPosition>>,
     /// Whether someone set the size: `set_size`, or the preferred size of the layout.
     size_set: Cell<bool>,
     /// The client size in logical pixels that `set_size` or the user asked for.
@@ -596,6 +598,7 @@ impl Win32WindowAdapter {
             renderer: Renderer::new(tree),
             size: Cell::new(PhysicalSize::new(800, 600)),
             requested_size: Cell::new(None),
+            requested_position: Cell::new(None),
             size_set: Cell::new(false),
             logical_size: Cell::new(None),
             in_dpi_change: Cell::new(false),
@@ -819,6 +822,10 @@ impl Win32WindowAdapter {
         match self.requested_size.take() {
             Some(size) => self.set_size(size),
             None => self.resized(self.content_size(client_size(hwnd))),
+        }
+        // Still hidden, so the move from where the system placed it doesn't show.
+        if let Some(position) = self.requested_position.take() {
+            self.set_position(position);
         }
         self.update_title_bar();
         Ok(hwnd)
@@ -1161,7 +1168,12 @@ impl WindowAdapter for Win32WindowAdapter {
             self.place_popup();
             return;
         }
-        let Some(hwnd) = self.hwnd.get() else { return };
+        let Some(hwnd) = self.hwnd.get() else {
+            if !self.detached {
+                self.requested_position.set(Some(position));
+            }
+            return;
+        };
         let p = position.to_physical(self.window.scale_factor());
         unsafe {
             let _ = SetWindowPos(

@@ -163,6 +163,18 @@ fn the_item_follows_what_the_user_does_to_the_window() {
     assert!(f.ui.get_is_maximized());
 }
 
+fn a_position_set_before_the_window_exists_applies() {
+    // As an application places its window before `show()`, which creates it.
+    let ui = WindowTest::new().unwrap();
+    ui.window().set_position(slint::PhysicalPosition::new(345, 234));
+    let hwnd =
+        Win32WindowAdapter::from_window(ui.window()).unwrap().create_hwnd_for_testing().unwrap();
+    let mut rc = RECT::default();
+    unsafe { GetWindowRect(hwnd, &mut rc).unwrap() };
+    assert_eq!((rc.left, rc.top), (345, 234));
+    assert_eq!(ui.window().position(), slint::PhysicalPosition::new(345, 234));
+}
+
 #[test]
 fn window_properties() {
     a_window_has_a_frame_by_default();
@@ -171,4 +183,5 @@ fn window_properties() {
     always_on_top_makes_the_window_topmost();
     the_icon_shows_in_the_window();
     the_item_follows_what_the_user_does_to_the_window();
+    a_position_set_before_the_window_exists_applies();
 }
