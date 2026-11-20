@@ -102,8 +102,8 @@ In both ways:
 - The fork's own feature `unstable-wuc` adds `slint::wuc`, which upstream doesn't have, so code
   that uses it doesn't build there. It extends a window's content into its title bar, as WinUI 3's
   `ExtendsContentIntoTitleBar` does: DWM keeps drawing the caption buttons, a `WindowMoveArea` is
-  the drag region, and the application lays out the rest. The API may change in any release, and
-  isn't in `v1.19.0-wuc.1`. `examples/titlebar` shows it over Mica: `cargo run -p example-titlebar`.
+  the drag region, and the application lays out the rest. The API may change in any release.
+  `examples/titlebar` shows it over Mica: `cargo run -p example-titlebar`.
 - Popup menus (context menus, the menu bar's drop-downs, the tray's menu) are dark when the color
   scheme is dark. Upstream's stay light.
 - A `DropArea` takes files and text that other programs drag onto the window, such as files from
@@ -114,7 +114,8 @@ In both ways:
 ## Costs
 
 The fork isn't faster or lighter than upstream. Upstream's gallery, built on each, on one
-machine (Ryzen 7 8745H, Radeon 780M, 125 %), medians of 7 runs (`tools/compare-numbers.ps1`):
+machine (Ryzen 7 8745H, Radeon 780M, 125 %), medians of 7 runs (`tools/compare-numbers.ps1`; the
+setup and what isn't measured are in `docs/design/costs.md`):
 
 |                           | Fork   | Upstream, FemtoVG (default) | Upstream, software |
 |---------------------------|--------|-----------------------------|--------------------|
