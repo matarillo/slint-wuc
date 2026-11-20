@@ -111,6 +111,22 @@ In both ways:
   modifier key, the proposed action is copy, also as on Qt. Dragging out of the window to other
   programs isn't supported, as on upstream's winit backend.
 
+## Costs
+
+The fork isn't faster or lighter than upstream. Upstream's gallery, built on each, on one
+machine (Ryzen 7 8745H, Radeon 780M, 125 %), medians of 7 runs (`tools/compare-numbers.ps1`):
+
+|                           | Fork   | Upstream, FemtoVG (default) | Upstream, software |
+|---------------------------|--------|-----------------------------|--------------------|
+| Window shown              | 56 ms  | 36 ms                       | 36 ms              |
+| Answers messages          | 115 ms | 116 ms                      | 42 ms              |
+| Private memory            | 47 MB  | 116 MB                      | 7 MB               |
+| CPU while a spinner turns | 3.0 %  | 8.7 %                       | 2.8 %              |
+
+Starting Direct3D, Direct2D, DirectWrite and Composition costs about 60 ms and 40 MB over the
+software renderer. Upstream's default uses more memory here mostly for its OpenGL driver, which
+varies with the GPU. What the fork gives for that cost is the Windows integration above.
+
 ## Developing the fork
 
 The tests, the probes and the tools that compare the fork with upstream read upstream's sources
