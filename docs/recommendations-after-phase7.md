@@ -100,7 +100,7 @@ A と C で要るものです。名前は 2026-11-20 に決めました (「決�
 
 ## 次の候補
 
-1. A: 実装した (2026-11-20、`slint::wuc`、`examples/titlebar`、`docs/design/windows.md` の Title Bar)。オーナーの手での確認 (ホバー、Snap Layouts、ドラッグ、別の DPI) が残り。ネイティブのメニューバーを持つ窓は広げられない (`SLINT_NO_MUDA` が要る)。
+1. A: 実装した (2026-11-20、`slint::wuc`、`examples/titlebar`、`docs/design/windows.md` の Title Bar)。オーナーが手で確認した (ドラッグ、ダブルクリック、右クリック、Snap Layouts、別の DPI、ダークモード)。ネイティブのメニューバーを持つ窓は広げられない (`SLINT_NO_MUDA` が要る)。
 2. D の数字を A のショーケースに添える。
 3. 推奨 6 の残り、C は、その後。
 
