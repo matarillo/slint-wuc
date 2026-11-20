@@ -8,11 +8,16 @@
 //! version of the `windows` crate would.
 //!
 //! - No argument: shows the window. `--scroll` scrolls the content up by 150px first.
-//! - `--web` also shows a WebView2 (display only) in the fourth image.
+//! - `--web` also shows a WebView2 in the fourth image, and forwards its input (`embed/web.rs`).
+//! - `--input-check <dir>`: with `--web`, posts input to the window, prints what arrived, writes
+//!   `embed-input.png`, and quits.
 //! - `--check <dir>`: counts presents and sync passes for 3 s, then writes `embed.png` and,
 //!   scrolled, `embed-scrolled.png` with `take_snapshot`, prints the visual tree, and quits.
 
 slint::include_modules!();
+
+#[path = "embed/web.rs"]
+mod web;
 
 use slint::ComponentHandle;
 use std::sync::Arc;
@@ -146,89 +151,6 @@ fn images(window: &slint::Window, gpu: &Gpu) -> windows::core::Result<[slint::Im
     Ok([image()?, image()?, image()?])
 }
 
-const PAGE: &str = r#"<!doctype html><body style="margin:0;background:#f4f4f4;font:20px 'Segoe UI'">
-<p style="margin:16px">WebView2 in a visual</p>
-<div style="position:absolute;top:80px;width:60px;height:60px;background:#e33;border-radius:30px;
-animation:m 1s infinite alternate linear"></div>
-<style>@keyframes m{from{left:16px}to{left:240px}}</style></body>"#;
-
-std::thread_local! {
-    /// The WebView2 lives as long as its controller.
-    static WEB: std::cell::RefCell<Option<webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// `--web`: a WebView2 in composition hosting mode, drawing into a container visual of the
-/// window's compositor, shown in the `web` image. Display only: no input reaches it.
-fn start_web(app: &Embed) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use webview2_com::Microsoft::Web::WebView2::Win32::{
-        CreateCoreWebView2Environment, ICoreWebView2Environment3,
-    };
-    use webview2_com::{
-        CreateCoreWebView2CompositionControllerCompletedHandler,
-        CreateCoreWebView2EnvironmentCompletedHandler,
-    };
-    let handle = app.window().window_handle();
-    let RawWindowHandle::Win32(win32) = handle.window_handle().unwrap().as_raw() else {
-        panic!("not a Win32 window");
-    };
-    let hwnd = windows::Win32::Foundation::HWND(win32.hwnd.get() as _);
-    let weak = app.as_weak();
-    let created =
-        CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(move |hr, env| {
-            hr?;
-            let env: ICoreWebView2Environment3 = env.unwrap().cast()?;
-            let shown = CreateCoreWebView2CompositionControllerCompletedHandler::create(Box::new(
-                move |hr, controller| {
-                    hr?;
-                    let Some(app) = weak.upgrade() else { return Ok(()) };
-                    let r = show_web(&app, controller.unwrap());
-                    if let Err(e) = &r {
-                        println!("web: {e}");
-                    }
-                    r
-                },
-            ));
-            unsafe { env.CreateCoreWebView2CompositionController(hwnd, &shown) }
-        }));
-    unsafe { CreateCoreWebView2Environment(&created) }.unwrap();
-}
-
-fn show_web(
-    app: &Embed,
-    composition: webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2CompositionController,
-) -> windows::core::Result<()> {
-    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller3;
-    let host = i_slint_core::host::Win32WindowAdapter::from_window(app.window()).unwrap();
-    let raw = host.compositor_abi();
-    let compositor = unsafe { Compositor::from_raw_borrowed(&raw) }.unwrap().clone();
-    let container = compositor.CreateContainerVisual()?;
-    // WebView2 draws in pixels; Slint's root visual scales logical pixels to physical ones.
-    let scale = app.window().scale_factor();
-    container.SetScale(windows_numerics::Vector3 { X: 1. / scale, Y: 1. / scale, Z: 1. })?;
-    unsafe { composition.SetRootVisualTarget(&container)? };
-    let controller: ICoreWebView2Controller3 = composition.cast()?;
-    let (w, h) = ((320. * scale).round() as i32, (240. * scale).round() as i32);
-    unsafe {
-        controller.SetShouldDetectMonitorScaleChanges(false)?;
-        controller.SetRasterizationScale(scale as f64)?;
-        controller.SetBounds(rect(0, 0, w, h))?;
-        controller.SetIsVisible(true)?;
-        let page = windows::core::HSTRING::from(PAGE);
-        controller.CoreWebView2()?.NavigateToString(windows::core::PCWSTR(page.as_ptr()))?;
-    }
-    let size = i_slint_core::graphics::IntSize::new(w as u32, h as u32);
-    let image = unsafe {
-        i_slint_core::visual_tree::image::external_visual_image(container.as_raw(), size)
-    };
-    app.set_web(image.unwrap());
-    let controller = controller.cast()?;
-    WEB.with(|web| *web.borrow_mut() = Some(controller));
-    println!("web: shown");
-    Ok(())
-}
-
 fn save(window: &slint::Window, path: &std::path::Path) {
     match window.take_snapshot() {
         Ok(shot) => {
@@ -262,16 +184,24 @@ fn main() {
     if args.iter().any(|a| a == "--scroll") {
         app.set_scroll(-150.);
     }
-    let web = args.iter().any(|a| a == "--web");
+    let input_check = args
+        .iter()
+        .position(|a| a == "--input-check")
+        .map(|i| std::path::PathBuf::from(args.get(i + 1).expect("--input-check <dir>")));
+    let web = input_check.is_some() || args.iter().any(|a| a == "--web");
     if web {
-        start_web(&app);
+        web::start(&app);
     }
     let stop = Arc::new(AtomicBool::new(false));
     let presents = Arc::new(AtomicU64::new(0));
     spawn_renderer(gpu, stop.clone(), presents.clone());
 
+    if let Some(dir) = input_check {
+        web::input_check(&app, dir);
+    }
     let Some(dir) = check else {
         app.run().unwrap();
+        web::close();
         stop.store(true, Ordering::Relaxed);
         return;
     };
@@ -308,4 +238,5 @@ fn main() {
         });
     });
     app.run().unwrap();
+    web::close();
 }

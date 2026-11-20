@@ -14,6 +14,25 @@ export component Embed inherits Window {
     in property <image> web;
     in-out property <length> scroll <=> flick.content-y;
 
+    // Item 6: the input of item D, for the application to forward to the WebView2.
+    in property <MouseCursor> web-cursor;
+    in-out property <string> before-text;
+    in-out property <string> after-text;
+    // Where D is in the window, for the WebView2's bounds.
+    out property <length> web-x: web-image.absolute-position.x;
+    out property <length> web-y: web-image.absolute-position.y;
+    callback web-pointer(PointerEvent, length, length);
+    callback web-wheel(length, length, length, length);
+    callback web-leave();
+    callback web-moved();
+    // Whether the focus came with Tab or Shift+Tab; the reason doesn't tell which.
+    callback web-focus-gained(bool);
+    callback web-focus-lost();
+    changed web-x => { root.web-moved(); }
+    changed web-y => { root.web-moved(); }
+    public function focus-before() { before.focus(); }
+    public function focus-after() { after.focus(); }
+
     flick := Flickable {
         content-height: 1000px;
 
@@ -56,7 +75,27 @@ export component Embed inherits Window {
                 source: root.covered;
             }
         }
-        // D: a WebView2 (`--web`) in a clip with rounded corners.
+        // Item 6: Slint's text inputs before and after the WebView2 in the focus chain.
+        Rectangle {
+            x: 20px;
+            y: 500px;
+            width: 150px;
+            height: 24px;
+            border-width: 1px;
+            border-color: before.has-focus ? #80c0ff : #808080;
+        }
+        before := TextInput {
+            x: 20px + 4px;
+            y: 500px;
+            width: 142px;
+            height: 24px;
+            color: white;
+            font-size: 16px;
+            text <=> root.before-text;
+        }
+
+        // D: a WebView2 (`--web`) in a clip with rounded corners. Item 6: the application
+        // forwards the input of the item to it.
         Rectangle {
             x: 380px;
             y: 280px;
@@ -65,23 +104,71 @@ export component Embed inherits Window {
             border-radius: 16px;
             clip: true;
             background: #404040;
-            Image {
+            web-image := Image {
                 width: 100%;
                 height: 100%;
                 source: root.web;
             }
+            web-focus := FocusScope {
+                focus-gained(reason) => {
+                    root.web-focus-gained(reason == FocusReason.tab-navigation);
+                }
+                focus-lost(reason) => {
+                    if reason != FocusReason.window-activation {
+                        root.web-focus-lost();
+                    }
+                }
+                TouchArea {
+                    mouse-cursor: root.web-cursor;
+                    pointer-event(event) => {
+                        if event.kind == PointerEventKind.down {
+                            web-focus.focus();
+                        }
+                        root.web-pointer(event, self.mouse-x, self.mouse-y);
+                    }
+                    scroll-event(event) => {
+                        root.web-wheel(event.delta-x, event.delta-y, self.mouse-x, self.mouse-y);
+                        accept
+                    }
+                    changed has-hover => {
+                        if !self.has-hover {
+                            root.web-leave();
+                        }
+                    }
+                }
+            }
         }
+        // Over A and D; its touch area keeps the input from the WebView2 under it.
         Rectangle {
             x: 200px;
             y: 300px;
             width: 300px;
             height: 120px;
             background: #ff000080;
+            TouchArea { }
             Text {
                 text: "Slint over the swap chain";
                 color: white;
                 font-size: 20px;
             }
+        }
+
+        Rectangle {
+            x: 190px;
+            y: 500px;
+            width: 150px;
+            height: 24px;
+            border-width: 1px;
+            border-color: after.has-focus ? #80c0ff : #808080;
+        }
+        after := TextInput {
+            x: 190px + 4px;
+            y: 500px;
+            width: 142px;
+            height: 24px;
+            color: white;
+            font-size: 16px;
+            text <=> root.after-text;
         }
 
         Text {

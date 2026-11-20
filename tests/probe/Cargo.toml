@@ -88,7 +88,7 @@ image = { workspace = true }
 # For `probe-perf`: process memory, handle and GDI/USER object counts, and process times.
 # For `probe-mica`: the system backdrop.
 # For `probe-embed`: a D3D11 device and swap chain of its own, and the compositor's interop.
-windows = { workspace = true, features = ["UI_Composition", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT_Composition", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows = { workspace = true, features = ["UI_Composition", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_WinRT_Composition", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 # For `probe-embed --web`: a WebView2 that draws into a visual of the window's compositor.
 webview2-com = "0.39"

@@ -959,7 +959,13 @@ fn dump_visual(visual: &ContainerVisual, depth: usize, out: &mut alloc::string::
     }
     out.push('\n');
     for child in &visual.Children().unwrap() {
-        dump_visual(&child.cast().unwrap(), depth + 1, out);
+        match child.cast() {
+            Ok(child) => dump_visual(&child, depth + 1, out),
+            // A visual of another process, as a WebView2 puts in an application's container.
+            Err(_) => {
+                let _ = writeln!(out, "{:indent$}(not a container)", "", indent = (depth + 1) * 2);
+            }
+        }
     }
 }
 
